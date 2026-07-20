@@ -13,6 +13,7 @@ Personal workspace for building AI projects powered by the Claude API. All three
 | `projects/debt-tracker` | Natural-language debt tracking with payoff projections |
 | `projects/financial-analysis` | Earnings reports, SEC filings, portfolio commentary via Claude |
 | `projects/news-summarizer` | Daily news digest → summaries, flashcards, Q&A output |
+| `projects/reader-assistant` | EN↔中文 translation, note/quote capture, book chat, summary + rating |
 
 ## Shared Utilities
 
