@@ -1,0 +1,112 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildSlotGrid,
+  defaultPollRange,
+  formatDuration,
+  formatKl,
+  instantToKl,
+  klToInstant,
+  shiftDate,
+} from "@/lib/slots";
+
+describe("Kuala Lumpur time conversion", () => {
+  it("treats wall-clock input as UTC+8", () => {
+    // 19:00 in KL is 11:00 UTC.
+    expect(klToInstant("2026-09-09", "19:00").toISOString()).toBe("2026-09-09T11:00:00.000Z");
+  });
+
+  it("round-trips an instant back to the same wall clock", () => {
+    const instant = klToInstant("2026-09-09", "19:30");
+    expect(instantToKl(instant)).toEqual({
+      date: "2026-09-09",
+      time: "19:30",
+      weekday: "Wed",
+      dayOfMonth: 9,
+    });
+  });
+
+  it("handles a slot that crosses midnight UTC without shifting the KL date", () => {
+    // 07:00 KL is 23:00 UTC the previous day.
+    const instant = klToInstant("2026-09-09", "07:00");
+    expect(instant.toISOString()).toBe("2026-09-08T23:00:00.000Z");
+    expect(instantToKl(instant).date).toBe("2026-09-09");
+  });
+
+  it("formats for display", () => {
+    expect(formatKl(klToInstant("2026-09-09", "19:00"))).toBe("Wed 9 Sep, 19:00");
+  });
+});
+
+describe("formatDuration", () => {
+  it("renders whole hours and part hours", () => {
+    expect(formatDuration(60)).toBe("1hr");
+    expect(formatDuration(120)).toBe("2hr");
+    expect(formatDuration(90)).toBe("1hr 30min");
+  });
+});
+
+describe("buildSlotGrid", () => {
+  it("builds a times x days grid over the polled window", () => {
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-09",
+      pollEndDate: "2026-09-11",
+      dayStartTime: "19:00",
+      dayEndTime: "21:00",
+      slotMinutes: 30,
+    });
+
+    expect(grid.days).toEqual(["2026-09-09", "2026-09-10", "2026-09-11"]);
+    expect(grid.times).toEqual(["19:00", "19:30", "20:00", "20:30"]);
+    expect(grid.grid).toHaveLength(4);
+    expect(grid.grid[0]).toHaveLength(3);
+    expect(grid.grid[0][0]).toEqual(klToInstant("2026-09-09", "19:00"));
+  });
+
+  it("excludes a trailing slot that would run past the end time", () => {
+    // 19:00-20:00 at 30min gives 19:00 and 19:30 — not 20:00, which would end at 20:30.
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-09",
+      pollEndDate: "2026-09-09",
+      dayStartTime: "19:00",
+      dayEndTime: "20:00",
+      slotMinutes: 30,
+    });
+    expect(grid.times).toEqual(["19:00", "19:30"]);
+  });
+
+  it("handles a single-day poll", () => {
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-09",
+      pollEndDate: "2026-09-09",
+      dayStartTime: "18:00",
+      dayEndTime: "22:00",
+      slotMinutes: 60,
+    });
+    expect(grid.days).toEqual(["2026-09-09"]);
+    expect(grid.times).toEqual(["18:00", "19:00", "20:00", "21:00"]);
+  });
+});
+
+describe("shiftDate", () => {
+  it("shifts forward a week for duplicate-session", () => {
+    expect(shiftDate("2026-09-09", 7)).toBe("2026-09-16");
+  });
+
+  it("crosses a month boundary", () => {
+    expect(shiftDate("2026-09-28", 7)).toBe("2026-10-05");
+  });
+
+  it("crosses a leap day", () => {
+    expect(shiftDate("2028-02-28", 1)).toBe("2028-02-29");
+  });
+});
+
+describe("defaultPollRange", () => {
+  it("covers the seven days starting tomorrow, in KL terms", () => {
+    // 2026-09-09T20:00Z is already 2026-09-10 in KL, so "tomorrow" is the 11th.
+    expect(defaultPollRange(new Date("2026-09-09T20:00:00Z"))).toEqual({
+      start: "2026-09-11",
+      end: "2026-09-17",
+    });
+  });
+});

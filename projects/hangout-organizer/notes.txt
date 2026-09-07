@@ -1,0 +1,23 @@
+projects/hangout-organizer is built — ~4,000 lines across 52 files. Everything I can verify without a live database passes.
+
+Verified:
+- npm test — 26/26 passing (quorum engine + KL slot maths)
+- npx tsc --noEmit — clean
+- npm run build — all 17 routes compile
+- Dev server boots; /, /venues, /calendar → 307 to /login; /s/… and /e/… reachable with no session; public API routes return 400s on bad input
+
+The core piece is src/lib/quorum.ts:76 — pure, no framework imports, tested first, same rule as debt-tracker's calculator.py. It scores each window on the intersection of its slots, so six people at 19:00 plus a different six at 20:00 correctly yields no 2-hour block. That case has its own test (tests/quorum.test.ts:77).
+
+Two things worth flagging:
+
+1. Use a new Supabase project. Not the one debt-tracker and reader-assistant share. Those run with RLS off because they're local; this app publishes an anon key to the browser, so co-locating would expose your bills and reading notes to anyone who opened the page. Worth confirming your free tier has room for a second project before you start. This is written into both CLAUDE.md files.
+2. One deviation from the approved plan: I used Next.js server actions for host mutations instead of the api/sessions/[id]/… route handlers the plan sketched. Route handlers are still there for the public writes, where they're needed — a friend has no session, so those endpoints authorise themselves against the share token. For host actions the session cookie already does that work, and a route handler would just be indirection.
+
+Your next steps — I can't run these for you:
+1. Create the Supabase project, run migrations/001_initial_schema.sql in its SQL editor.
+2. Add http://localhost:3000/auth/callback to Supabase → Authentication → URL Configuration.
+3. cp .env.local.example .env.local, fill in the three Supabase values.
+4. npm run dev, sign in, then walk the flow in README.md § First run.
+                                                                                                                                                                                                                                        Note node isn't on your shell PATH — it's at C:\Program Files\nodejs.
+
+The end-to-end checks from the plan (six people filling a poll until a 2-hour window qualifies, then the phone test on the drag grid) still need a real database. Tell me when the migration's run and I'll walk through them with you. Nothing is committed yet.

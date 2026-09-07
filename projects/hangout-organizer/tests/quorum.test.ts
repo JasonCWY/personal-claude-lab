@@ -1,0 +1,185 @@
+import { describe, expect, it } from "vitest";
+import {
+  computeCandidates,
+  computeSlotCounts,
+  pendingResponders,
+  type AvailabilityEntry,
+  type QuorumRules,
+} from "@/lib/quorum";
+import { klToInstant } from "@/lib/slots";
+
+// Badminton: 6 people -> 2 hours, 4 people -> 1 hour.
+const BADMINTON: QuorumRules = {
+  minPlayersFull: 6,
+  fullDurationMinutes: 120,
+  minPlayersShort: 4,
+  shortDurationMinutes: 60,
+};
+
+const DAY = "2026-09-09";
+
+/** `free("19:00", ["a","b"])` -> availability rows for that slot. */
+function free(time: string, people: string[]): AvailabilityEntry[] {
+  return people.map((personId) => ({
+    personId,
+    slotStart: klToInstant(DAY, time),
+  }));
+}
+
+const SIX = ["ali", "ben", "cara", "dee", "eve", "finn"];
+const FIVE = SIX.slice(0, 5);
+const THREE = SIX.slice(0, 3);
+
+describe("computeCandidates", () => {
+  it("returns a full-tier 2-hour window when 6 people are free right across it", () => {
+    const availability = [
+      ...free("19:00", SIX),
+      ...free("19:30", SIX),
+      ...free("20:00", SIX),
+      ...free("20:30", SIX),
+    ];
+
+    const result = computeCandidates(availability, BADMINTON, 30);
+
+    expect(result[0].tier).toBe("full");
+    expect(result[0].durationMinutes).toBe(120);
+    expect(result[0].headcount).toBe(6);
+    expect(result[0].start).toEqual(klToInstant(DAY, "19:00"));
+    expect(result[0].end).toEqual(klToInstant(DAY, "21:00"));
+  });
+
+  it("treats the ideal headcount as inclusive, not 'more than'", () => {
+    const availability = ["19:00", "19:30", "20:00", "20:30"].flatMap((t) => free(t, SIX));
+    expect(computeCandidates(availability, BADMINTON, 30)[0].headcount).toBe(6);
+  });
+
+  it("falls back to a 1-hour window when only 5 people are free", () => {
+    const availability = ["19:00", "19:30", "20:00", "20:30"].flatMap((t) => free(t, FIVE));
+
+    const result = computeCandidates(availability, BADMINTON, 30);
+
+    expect(result.every((c) => c.tier === "short")).toBe(true);
+    expect(result[0].durationMinutes).toBe(60);
+    expect(result[0].headcount).toBe(5);
+  });
+
+  it("returns nothing when even the fallback headcount is not met", () => {
+    const availability = ["19:00", "19:30", "20:00", "20:30"].flatMap((t) => free(t, THREE));
+    expect(computeCandidates(availability, BADMINTON, 30)).toEqual([]);
+  });
+
+  it("does NOT merge different people across slots into one window", () => {
+    // Six free at 19:00-19:30 and a different six at 20:00-20:30. Per-slot counts
+    // look great, but nobody spans the whole two hours and only 2 people overlap.
+    const groupA = ["ali", "ben", "cara", "dee", "eve", "finn"];
+    const groupB = ["ali", "ben", "gus", "hana", "ivy", "jo"];
+    const availability = [
+      ...free("19:00", groupA),
+      ...free("19:30", groupA),
+      ...free("20:00", groupB),
+      ...free("20:30", groupB),
+    ];
+
+    const result = computeCandidates(availability, BADMINTON, 30);
+
+    // No 2-hour window: the intersection across all four slots is just ali + ben.
+    expect(result.some((c) => c.durationMinutes === 120)).toBe(false);
+    // But each group's own hour is bookable at the short tier.
+    const shortWindows = result.filter((c) => c.tier === "short");
+    expect(shortWindows).toHaveLength(2);
+    expect(shortWindows.every((c) => c.headcount === 6)).toBe(true);
+  });
+
+  it("never spans a gap in the polled slots", () => {
+    // 20:00 is missing entirely, so no window can bridge 19:30 -> 20:30.
+    const availability = [
+      ...free("19:00", SIX),
+      ...free("19:30", SIX),
+      ...free("20:30", SIX),
+      ...free("21:00", SIX),
+    ];
+
+    const result = computeCandidates(availability, BADMINTON, 30);
+
+    expect(result.some((c) => c.durationMinutes === 120)).toBe(false);
+    expect(result.filter((c) => c.tier === "short")).toHaveLength(2);
+  });
+
+  it("hides a short window that sits inside a qualifying full window", () => {
+    const availability = ["19:00", "19:30", "20:00", "20:30"].flatMap((t) => free(t, SIX));
+
+    const result = computeCandidates(availability, BADMINTON, 30);
+
+    // Three 1-hour windows fit inside 19:00-21:00; none should be reported.
+    expect(result).toHaveLength(1);
+    expect(result[0].tier).toBe("full");
+  });
+
+  it("ranks full tier first, then headcount, then earliest start", () => {
+    const seven = [...SIX, "gus"];
+    const availability = [
+      // 18:00-20:00 -> 6 people
+      ...free("18:00", SIX),
+      ...free("18:30", SIX),
+      // 19:00-21:00 -> 7 people (overlaps the above)
+      ...free("19:00", seven),
+      ...free("19:30", seven),
+      ...free("20:00", seven),
+      ...free("20:30", seven),
+    ];
+
+    const result = computeCandidates(availability, BADMINTON, 30);
+
+    expect(result[0].headcount).toBe(7);
+    expect(result[0].start).toEqual(klToInstant(DAY, "19:00"));
+    for (let i = 1; i < result.length; i++) {
+      const prev = result[i - 1];
+      const cur = result[i];
+      if (prev.tier === cur.tier) expect(prev.headcount).toBeGreaterThanOrEqual(cur.headcount);
+    }
+  });
+
+  it("works with 60-minute slots", () => {
+    const availability = [...free("19:00", SIX), ...free("20:00", SIX)];
+
+    const result = computeCandidates(availability, BADMINTON, 60);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].durationMinutes).toBe(120);
+  });
+
+  it("skips a tier whose duration is not a whole number of slots", () => {
+    const availability = [...free("19:00", SIX), ...free("20:00", SIX)];
+    const odd: QuorumRules = { ...BADMINTON, shortDurationMinutes: 90 };
+
+    // 90 minutes cannot be built from 60-minute slots; the 2-hour tier still works.
+    const result = computeCandidates(availability, odd, 60);
+
+    expect(result.every((c) => c.durationMinutes === 120)).toBe(true);
+  });
+
+  it("returns nothing for an empty poll", () => {
+    expect(computeCandidates([], BADMINTON, 30)).toEqual([]);
+  });
+});
+
+describe("computeSlotCounts", () => {
+  it("counts each slot independently and sorts people for stable output", () => {
+    const counts = computeSlotCounts([...free("19:00", ["cara", "ali"]), ...free("19:30", ["ali"])]);
+
+    expect(counts.get(klToInstant(DAY, "19:00").getTime())).toEqual(["ali", "cara"]);
+    expect(counts.get(klToInstant(DAY, "19:30").getTime())).toEqual(["ali"]);
+  });
+
+  it("de-duplicates a person submitted twice for the same slot", () => {
+    const counts = computeSlotCounts([...free("19:00", ["ali"]), ...free("19:00", ["ali"])]);
+    expect(counts.get(klToInstant(DAY, "19:00").getTime())).toEqual(["ali"]);
+  });
+});
+
+describe("pendingResponders", () => {
+  it("lists roster members who have not answered", () => {
+    const roster = [{ id: "ali" }, { id: "ben" }, { id: "cara" }];
+    expect(pendingResponders(roster, ["ben"])).toEqual([{ id: "ali" }, { id: "cara" }]);
+  });
+});
