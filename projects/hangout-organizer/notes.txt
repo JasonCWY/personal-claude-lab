@@ -1,44 +1,41 @@
-hangout-organizer — status after the 2026-09-08 review pass.
+hangout-organizer — status after the 2026-09-08 session.
 
-Still true from last time: ~4,000 lines across 52 files, npm test 26/26, npx tsc --noEmit clean,
-npm run build compiles all 17 routes. The code is committed (5cf14ef) — the last note saying
-"nothing is committed yet" was written just before the commit.
+THE APP IS RUNNING AND SIGNED IN. The long-standing blocker (no Supabase project) is gone.
 
-This session was a review of the deployed-app surface. Three things changed.
+Live setup:
+- Supabase project: koenkkrybqfgszisuabz  (a NEW project, not the old shared one)
+- Migration run. All 11 tables + host_allowlist exist. Seeds: 2 sports, 3 checklist
+  templates with 23 items, 1 host_allowlist row.
+- Host user created and confirmed; magic-link sign-in reaches the dashboard.
+- Public signups disabled.
+- .env.local filled in (gitignored). Dev server on http://localhost:3000.
 
-1. RLS was scoped to the host, and this was a real hole, not a tidy-up.
-   The old policy was `for all to authenticated using (true)`. The anon key and the project URL
-   both ship in the browser bundle, so a stranger can POST to Supabase's own auth endpoint, get a
-   magic link for their OWN address, and hold a valid `authenticated` JWT without ever loading
-   this app. From there PostgREST would have handed them every table. The app-side gates
-   (auth/callback signing non-hosts out, the (host) layout re-check) never see that request.
-   The migration now creates a `host_allowlist` table (RLS on, zero policies, so nothing but
-   service_role can read it) and an `is_host()` SECURITY DEFINER function with a pinned
-   search_path; every policy is `using (is_host())`.
-   => You must replace `you@example.com` near the bottom of the migration with your real address
-      before running it. It has to match HOST_EMAIL. Leave the placeholder and every page is empty.
+RLS was verified empirically, not just assumed: querying every table with the PUBLISHABLE key
+returns 0 rows, while the secret key returns the real data (sports 2, host_allowlist 1). That is
+the fix from earlier this session working — see the Row Level Security block in the migration.
 
-2. Open redirect in auth/callback/route.ts. `next` comes back from the magic link, and
-   `next.startsWith("/")` also passes `//evil.com`, which browsers read as protocol-relative.
-   Now rejects a second leading slash or backslash.
+Two setup traps, both hit for real:
 
-3. Input caps on api/public/s/[token]/availability. That endpoint is open to anyone with the
-   link; `comment` was unbounded. Now MAX_SLOTS 2000, MAX_COMMENT 500.
+1. Create the host auth user BEFORE disabling public signups.
+   signInWithOtp defaults to shouldCreateUser:true, so on a fresh project with signups off you
+   get "Signups not allowed for this instance" and there is no way in — nobody can sign in
+   because nobody exists, and nobody can be created. Fixed by creating the user through the
+   admin API (Authentication -> Users -> Add user does the same thing).
 
-Deliberately NOT changed: `shouldCreateUser` on the login form stays true. Setting it false is
-security theatre — an attacker never uses our client. The real control is the Supabase dashboard
-toggle, which is now step 4 of the README.
+2. Do not paste real keys into .env.local.example — that file is TRACKED. They belong in
+   .env.local, which is gitignored. This happened and was cleaned out of git history before
+   anything was pushed.
 
-Your next steps — I can't run these for you:
-1. Create the new Supabase project (NOT the one debt-tracker/reader-assistant share).
-2. Edit `you@example.com` in migrations/001_initial_schema.sql, then run the whole file.
-3. Authentication -> URL Configuration: add http://localhost:3000/auth/callback
-4. Authentication -> Sign In / Providers: turn OFF "Allow new users to sign up".
-5. cp .env.local.example .env.local, fill in the three Supabase values + HOST_EMAIL.
-6. npm run dev, sign in, walk README.md § First run.
+Still outstanding:
+- ROTATE THE SECRET KEY. It briefly sat in a tracked file. Also take the new sb_secret_ format
+  while you are there — the one in use is the legacy service_role JWT, deprecated end of 2026.
+- Delete the OLD Supabase project (njpuqhfheyrytrqnmmnq). Safe once reader-assistant moves off
+  it: debt-tracker's data is already local SQLite, and reader-assistant's tables were never
+  created, so there is nothing in there to lose.
+- Move reader-assistant to SQLite, same shape as debt-tracker (commit 190c2f9).
+- The end-to-end checks that need real data: six people filling a poll until a 2-hour window
+  qualifies, then the phone test on the drag grid.
 
-Note node isn't on PATH — it's at C:\Program Files\nodejs.
+First run from here: Roster -> Venues -> New session -> copy the WhatsApp message.
 
-Still outstanding, needs a live database: the end-to-end checks from the plan — six people filling
-a poll until a 2-hour window qualifies, then the phone test on the drag grid. Tell me when the
-migration's run and we'll walk them together.
+Note node is at C:\Program Files\nodejs (on PATH in PowerShell, not in the Bash tool).
