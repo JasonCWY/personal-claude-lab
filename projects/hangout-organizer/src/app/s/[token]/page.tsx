@@ -8,6 +8,7 @@ import type {
   Person,
   Poll,
   PollResponse,
+  SessionOptOut,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +65,22 @@ export default async function PublicPollPage({
   const existing: Record<string, number[]> = {};
   for (const row of (availabilityData ?? []) as AvailabilityRow[]) {
     (existing[row.person_id] ??= []).push(new Date(row.slot_start).getTime());
+  }
+
+  // Which activities each person has said they are not up for, so returning to
+  // the link shows their previous answer rather than resetting it.
+  const { data: optOutData } = sessions.length
+    ? await supabase
+        .from("session_optouts")
+        .select("*")
+        .in(
+          "session_id",
+          sessions.map((s) => s.id),
+        )
+    : { data: [] };
+  const existingOptOuts: Record<string, string[]> = {};
+  for (const row of (optOutData ?? []) as SessionOptOut[]) {
+    (existingOptOuts[row.person_id] ??= []).push(row.session_id);
   }
 
   const byDate = poll.granularity === 'date';
@@ -141,6 +158,8 @@ export default async function PublicPollPage({
             roster={roster}
             existing={existing}
             respondedIds={((responseData ?? []) as PollResponse[]).map((r) => r.person_id)}
+            sessions={sessions}
+            existingOptOuts={existingOptOuts}
           />
         )}
       </div>

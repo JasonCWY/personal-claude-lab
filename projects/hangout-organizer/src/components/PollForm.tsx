@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AvailabilityGrid } from "@/components/AvailabilityGrid";
 import { DateGrid } from "@/components/DateGrid";
-import type { Person } from "@/lib/types";
+import type { GameSession, Person } from "@/lib/types";
 
 interface Props {
   token: string;
@@ -19,18 +19,33 @@ interface Props {
   /** person_id -> slot timestamps they already submitted, so answers are editable. */
   existing: Record<string, number[]>;
   respondedIds: string[];
+  /** The activities this poll is trying to arrange. */
+  sessions: GameSession[];
+  /** person_id -> session_ids they previously said they were not up for. */
+  existingOptOuts: Record<string, string[]>;
 }
 
-export function PollForm({ token, spec, roster, existing, respondedIds }: Props) {
+export function PollForm({
+  token,
+  spec,
+  roster,
+  existing,
+  respondedIds,
+  sessions,
+  existingOptOuts,
+}: Props) {
   const [personId, setPersonId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [comment, setComment] = useState("");
+  // Opt-outs, so an activity added later counts everyone until they say no.
+  const [optOut, setOptOut] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const responded = new Set(respondedIds);
 
   function pick(person: Person) {
     setPersonId(person.id);
     setSelected(new Set(existing[person.id] ?? []));
+    setOptOut(new Set(existingOptOuts[person.id] ?? []));
     setStatus("idle");
   }
 
@@ -45,6 +60,7 @@ export function PollForm({ token, spec, roster, existing, respondedIds }: Props)
           personId,
           slots: [...selected].map((ms) => new Date(ms).toISOString()),
           comment: comment.trim() || null,
+          optOutSessionIds: [...optOut],
         }),
       });
       setStatus(res.ok ? "saved" : "error");
@@ -111,6 +127,47 @@ export function PollForm({ token, spec, roster, existing, respondedIds }: Props)
         <DateGrid spec={spec} selected={selected} onChange={setSelected} />
       ) : (
         <AvailabilityGrid spec={spec} selected={selected} onChange={setSelected} />
+      )}
+
+      {sessions.length > 1 && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <h3 className="text-sm font-medium">Which of these are you up for?</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Your times above count for everything you leave ticked.
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {sessions.map((session) => {
+              const on = !optOut.has(session.id);
+              return (
+                <label
+                  key={session.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                    on ? "border-slate-900 bg-white" : "border-slate-200 bg-slate-100 text-slate-400"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() =>
+                      setOptOut((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(session.id)) next.delete(session.id);
+                        else next.add(session.id);
+                        return next;
+                      })
+                    }
+                  />
+                  {session.title}
+                </label>
+              );
+            })}
+          </div>
+          {optOut.size === sessions.length && (
+            <p className="mt-2 text-xs text-amber-700">
+              You have unticked everything, so your times will not count toward anything.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="mt-4 space-y-3">

@@ -106,6 +106,15 @@ export interface PollResponse {
   comment: string | null;
 }
 
+/**
+ * A person saying "not this one" about one activity in a multi-activity poll.
+ * Absence of a row means they are in — see migrations/005 for why.
+ */
+export interface SessionOptOut {
+  session_id: string;
+  person_id: string;
+}
+
 export interface PollInvitee {
   poll_id: string;
   person_id: string;

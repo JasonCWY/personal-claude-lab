@@ -27,6 +27,7 @@ import type {
   Poll,
   PollResponse,
   RosterGroup,
+  SessionOptOut,
   Sport,
   Venue,
 } from "@/lib/types";
@@ -86,6 +87,24 @@ export default async function PollPage({
     slotStart: new Date(row.slot_start),
   }));
   const slotCounts = computeSlotCounts(entries);
+
+  // Who said "not this one" about which activity. Absence means in, so an
+  // activity added mid-poll counts everyone until they say otherwise.
+  const { data: optOutData } = sessions.length
+    ? await supabase
+        .from("session_optouts")
+        .select("*")
+        .in(
+          "session_id",
+          sessions.map((s) => s.id),
+        )
+    : { data: [] };
+  const optOutsBySession = new Map<string, Set<string>>();
+  for (const row of (optOutData ?? []) as SessionOptOut[]) {
+    const set = optOutsBySession.get(row.session_id) ?? new Set<string>();
+    set.add(row.person_id);
+    optOutsBySession.set(row.session_id, set);
+  }
   const pending = pendingResponders(roster, responses.map((r) => r.person_id));
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
 
@@ -224,9 +243,23 @@ export default async function PollPage({
       {sessions.map((session) => {
         const sport = sports.find((s) => s.id === session.sport_id);
         const venue = venues.find((v) => v.id === session.venue_id);
+
+        // Someone free on Tuesday is not thereby a pickleball player. Only
+        // people who left this activity ticked count toward its quorum.
+        const optedOut = optOutsBySession.get(session.id) ?? new Set<string>();
+        const sessionEntries = entries.filter((e) => !optedOut.has(e.personId));
+        const optedOutNames = [...optedOut].map((pid) => names.get(pid) ?? pid).sort();
+
+        // People who answered before this activity was added never saw it, so
+        // they are being counted without having said yes. Worth naming.
+        const answeredBefore = responses
+          .filter((r) => r.submitted_at < session.created_at && !optedOut.has(r.person_id))
+          .map((r) => names.get(r.person_id) ?? r.person_id)
+          .sort();
+
         const blocks = groupCandidates(
           computeCandidates(
-            entries,
+            sessionEntries,
             {
               minPlayersFull: session.min_players_full,
               fullDurationMinutes: session.full_duration_minutes,
@@ -257,6 +290,22 @@ export default async function PollPage({
                 {session.status}
               </Badge>
             </div>
+
+            {sessions.length > 1 && (optedOutNames.length > 0 || answeredBefore.length > 0) && (
+              <div className="mb-3 space-y-1 text-xs">
+                {optedOutNames.length > 0 && (
+                  <p className="text-slate-500">
+                    Not up for this: {optedOutNames.join(", ")} — their times are excluded here.
+                  </p>
+                )}
+                {answeredBefore.length > 0 && (
+                  <p className="text-amber-700">
+                    {answeredBefore.join(", ")} answered before this activity was added, so they
+                    are counted without having said yes to it.
+                  </p>
+                )}
+              </div>
+            )}
 
             {session.status === "confirmed" && session.confirmed_start_at ? (
               <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4">

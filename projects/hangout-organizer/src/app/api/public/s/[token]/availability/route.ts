@@ -25,7 +25,13 @@ export async function POST(
 ) {
   const { token } = await params;
 
-  let body: { personId?: string; slots?: string[]; comment?: string | null };
+  let body: {
+    personId?: string;
+    slots?: string[];
+    comment?: string | null;
+    /** Activities in this poll the person is NOT up for. Absence means in. */
+    optOutSessionIds?: string[];
+  };
   try {
     body = await request.json();
   } catch {
@@ -111,6 +117,36 @@ export async function POST(
     );
     if (error) {
       return NextResponse.json({ error: "Could not save availability" }, { status: 500 });
+    }
+  }
+
+  // "Which of these are you up for?" — recorded as opt-OUTS so that an activity
+  // added to a running poll counts everyone by default and nobody has to answer
+  // again. Only sessions belonging to THIS poll are touched, so a crafted body
+  // cannot opt someone out of an activity in someone else's poll.
+  const { data: pollSessions } = await supabase
+    .from("sessions")
+    .select("id")
+    .eq("poll_id", poll.id);
+  const sessionIds = new Set((pollSessions ?? []).map((r) => r.id as string));
+
+  const optOuts = Array.isArray(body.optOutSessionIds)
+    ? [...new Set(body.optOutSessionIds.map(String))].filter((id) => sessionIds.has(id))
+    : [];
+
+  if (sessionIds.size) {
+    await supabase
+      .from("session_optouts")
+      .delete()
+      .eq("person_id", personId)
+      .in("session_id", [...sessionIds]);
+  }
+  if (optOuts.length) {
+    const { error } = await supabase
+      .from("session_optouts")
+      .insert(optOuts.map((session_id) => ({ session_id, person_id: personId })));
+    if (error) {
+      return NextResponse.json({ error: "Could not save your activity choices" }, { status: 500 });
     }
   }
 
