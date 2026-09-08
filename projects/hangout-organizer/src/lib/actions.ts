@@ -91,12 +91,12 @@ function validateSessionForm(form: FormData): string | null {
     return "The 'poll until' date is before the 'poll from' date.";
   }
 
+  // An end at or before the start means the next day (22:00-00:00 is a normal
+  // evening session), so only equality is rejected — that would be 24 hours.
   const startTime = str(form, "day_start_time");
   const endTime = str(form, "day_end_time");
-  if (endTime <= startTime) {
-    return endTime === "00:00"
-      ? "A session ending at midnight isn't supported — the latest end must be after the earliest start on the same day. Try 23:30."
-      : "The latest end must be after the earliest start.";
+  if (endTime === startTime) {
+    return "The earliest start and latest end are the same time.";
   }
 
   const slot = Number(str(form, "slot_minutes") || 30);

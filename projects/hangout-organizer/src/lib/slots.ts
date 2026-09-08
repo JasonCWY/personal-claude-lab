@@ -13,7 +13,8 @@ export const KL_OFFSET_MINUTES = 8 * 60;
 export const CURRENCY = "MYR";
 
 const MINUTE_MS = 60_000;
-const DAY_MS = 24 * 60 * MINUTE_MS;
+const MINUTES_PER_DAY = 24 * 60;
+const DAY_MS = MINUTES_PER_DAY * MINUTE_MS;
 
 /** "2026-09-10" + "19:30" (Kuala Lumpur wall clock) -> absolute instant. */
 export function klToInstant(dateStr: string, timeStr: string): Date {
@@ -61,6 +62,12 @@ export interface SlotGridSpec {
   pollStartDate: string; // YYYY-MM-DD
   pollEndDate: string; // YYYY-MM-DD
   dayStartTime: string; // HH:MM
+  /**
+   * HH:MM. If this is at or before dayStartTime it means the NEXT day, so a
+   * 22:00-02:00 session is four hours, not a negative one. "22:00-00:00" is the
+   * common case and needs no day rollover at all: the last slot that fits
+   * starts at 23:30.
+   */
   dayEndTime: string; // HH:MM
   slotMinutes: number;
 }
@@ -88,19 +95,36 @@ export function buildSlotGrid(spec: SlotGridSpec): SlotGrid {
     days.push(instantToKl(new Date(t)).date);
   }
 
-  const times: string[] = [];
   const [sh, sm] = spec.dayStartTime.split(":").map(Number);
   const [eh, em] = spec.dayEndTime.split(":").map(Number);
   const pad = (n: number) => String(n).padStart(2, "0");
-  for (
-    let mins = sh * 60 + sm;
-    mins + spec.slotMinutes <= eh * 60 + em;
-    mins += spec.slotMinutes
-  ) {
-    times.push(`${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`);
+
+  const startMins = sh * 60 + sm;
+  let endMins = eh * 60 + em;
+  // An end at or before the start means the session runs into the next day.
+  if (endMins <= startMins) endMins += MINUTES_PER_DAY;
+
+  // Minutes from midnight of the polled day, so a value past 1440 is tomorrow.
+  const offsets: number[] = [];
+  for (let mins = startMins; mins + spec.slotMinutes <= endMins; mins += spec.slotMinutes) {
+    offsets.push(mins);
   }
 
-  const grid = times.map((time) => days.map((day) => klToInstant(day, time)));
+  const times = offsets.map((mins) => {
+    const wrapped = mins % MINUTES_PER_DAY;
+    return `${pad(Math.floor(wrapped / 60))}:${pad(wrapped % 60)}`;
+  });
+
+  // Slots that spilled past midnight belong to the following calendar day.
+  const grid = offsets.map((mins, i) =>
+    days.map(
+      (day) =>
+        new Date(
+          klToInstant(day, times[i]).getTime() +
+            Math.floor(mins / MINUTES_PER_DAY) * DAY_MS,
+        ),
+    ),
+  );
   return { days, times, grid };
 }
 

@@ -110,3 +110,60 @@ describe("defaultPollRange", () => {
     });
   });
 });
+
+describe("buildSlotGrid across midnight", () => {
+  it("treats an end of 00:00 as the end of the same evening", () => {
+    // The case that motivated this: a 10pm-12am session. Nothing rolls over —
+    // the last slot that fits starts at 23:30.
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-14",
+      pollEndDate: "2026-09-14",
+      dayStartTime: "22:00",
+      dayEndTime: "00:00",
+      slotMinutes: 30,
+    });
+    expect(grid.times).toEqual(["22:00", "22:30", "23:00", "23:30"]);
+    expect(grid.grid[0][0].toISOString()).toBe("2026-09-14T14:00:00.000Z"); // 22:00 KL
+    expect(grid.grid[3][0].toISOString()).toBe("2026-09-14T15:30:00.000Z"); // 23:30 KL
+  });
+
+  it("rolls slots past midnight onto the next calendar day", () => {
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-14",
+      pollEndDate: "2026-09-14",
+      dayStartTime: "23:00",
+      dayEndTime: "01:00",
+      slotMinutes: 30,
+    });
+    expect(grid.times).toEqual(["23:00", "23:30", "00:00", "00:30"]);
+    // 00:00 KL on the 15th is 16:00 UTC on the 14th.
+    expect(instantToKl(grid.grid[2][0]).date).toBe("2026-09-15");
+    expect(instantToKl(grid.grid[2][0]).time).toBe("00:00");
+  });
+
+  it("keeps overnight slots contiguous so a window can span midnight", () => {
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-14",
+      pollEndDate: "2026-09-14",
+      dayStartTime: "23:00",
+      dayEndTime: "01:00",
+      slotMinutes: 30,
+    });
+    const starts = grid.grid.map((row) => row[0].getTime());
+    for (let i = 1; i < starts.length; i++) {
+      expect(starts[i] - starts[i - 1]).toBe(30 * 60_000);
+    }
+  });
+
+  it("still produces a plain same-day grid when the end is after the start", () => {
+    const grid = buildSlotGrid({
+      pollStartDate: "2026-09-14",
+      pollEndDate: "2026-09-14",
+      dayStartTime: "18:00",
+      dayEndTime: "20:00",
+      slotMinutes: 60,
+    });
+    expect(grid.times).toEqual(["18:00", "19:00"]);
+    expect(instantToKl(grid.grid[1][0]).date).toBe("2026-09-14");
+  });
+});

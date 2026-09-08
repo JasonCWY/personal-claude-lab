@@ -79,7 +79,9 @@ create table if not exists sessions (
   created_at                  timestamptz not null default now(),
 
   constraint sessions_poll_range   check (poll_end_date >= poll_start_date),
-  constraint sessions_day_range    check (day_end_time > day_start_time),
+  -- An end at or before the start means the next day, so 22:00-00:00 and
+  -- 21:00-01:00 are both valid. Equality would mean a 24-hour window.
+  constraint sessions_day_range    check (day_end_time <> day_start_time),
   constraint sessions_slot_minutes check (slot_minutes in (30, 60))
 );
 
