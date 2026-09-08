@@ -1,23 +1,21 @@
 hangout-organizer — status at the end of the 2026-09-08 session.
 
-WORKING LOCALLY, NOT YET DEPLOYED. Supabase project koenkkrybqfgszisuabz, migrations 001–005 all
+DEPLOYED: https://personal-claude-lab.vercel.app  (Vercel project root: projects/hangout-organizer)
+
+Also working locally. Supabase project koenkkrybqfgszisuabz, migrations 001–005 all
 run, host signed in, dev server on http://localhost:3000. Test data cleared; roster and sports kept.
 
-DEPLOY IS THE ONLY THING LEFT. Steps, in order:
-  1. `git push origin main`  — 11 commits were still unpushed at the end of the session.
-     (Claude could not run this; the permission classifier blocks push.)
-  2. Vercel -> New Project -> this repo -> ROOT DIRECTORY: projects/hangout-organizer
-  3. Vercel env vars (values are in projects/hangout-organizer/.env.local, which is gitignored):
-       NEXT_PUBLIC_SUPABASE_URL
-       NEXT_PUBLIC_SUPABASE_ANON_KEY        (publishable key)
-       SUPABASE_SERVICE_ROLE_KEY            (secret key)
-       HOST_EMAIL
-       NEXT_PUBLIC_SITE_URL  <- MUST be the Vercel URL, not localhost. Share links are built
-                                from it, so leaving it as localhost pastes dead links into
-                                the group chat.
-  4. Supabase -> Authentication -> URL Configuration: add https://<app>.vercel.app/auth/callback
-     alongside the localhost one.
-  5. Sign in on the deployed URL and make a real poll.
+Deploy is done. Verified on the live site 2026-09-09:
+  - / and /venues redirect to /login; /login renders; unknown /s/<token> 404s
+  - the deployed bundle contains signInWithPassword, so it is the current build
+  - NEXT_PUBLIC_SUPABASE_URL and the publishable key are inlined (expected)
+  - THE SECRET KEY IS NOT IN THE CLIENT BUNDLE (the check that matters)
+
+ONE THING NOT YET CONFIRMED: NEXT_PUBLIC_SITE_URL on Vercel. It is only read
+server-side, on pages behind auth, so it cannot be checked from outside. Sign in
+on the deployed URL, open a poll, and look at the share link — it must start
+https://personal-claude-lab.vercel.app/s/… and NOT localhost. A wrong value here
+looks fine on the host's screen and is dead on everyone else's phone.
 
 WHAT THE APP DOES NOW (all built this session, on top of the original build):
 
