@@ -19,7 +19,7 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
-import { CopyLink } from "@/components/CopyLink";
+import { ShareMessage } from "@/components/ShareMessage";
 import { SITE_URL } from "@/lib/env";
 import type { EventTask, HangoutEvent, Person } from "@/lib/types";
 
@@ -56,9 +56,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
       <Card className="mb-6">
         <h2 className="mb-2 font-medium">Share the checklist</h2>
-        <CopyLink
+        <ShareMessage
           url={shareUrl}
-          message={`${event.title} — here is the checklist. Tick off anything you have done:`}
+          defaultMessage={`${event.title} — here is the checklist. Tick off anything you have done:`}
         />
         <p className="mt-2 text-xs text-slate-500">
           Anyone with this link can tick tasks off. They cannot add, edit or delete them.

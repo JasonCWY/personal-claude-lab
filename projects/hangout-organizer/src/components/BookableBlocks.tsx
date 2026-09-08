@@ -1,0 +1,210 @@
+import { confirmSession } from "@/lib/actions";
+import { Badge, Button, Select } from "@/components/ui";
+import { formatDuration, formatSpan, instantToKl, formatDayHeader } from "@/lib/slots";
+import type { CandidateBlock } from "@/lib/quorum";
+import type { Person, Venue } from "@/lib/types";
+
+/**
+ * Bookable windows, drawn as bars on a per-day timeline.
+ *
+ * The old list showed one row per qualifying start, so a single 3-hour free
+ * stretch appeared as five near-identical options and read as noise. These are
+ * grouped blocks (see quorum.groupCandidates): one bar per stretch of time,
+ * with the start times offered inside it. The host makes one decision — which
+ * evening — and then a smaller one about when to begin.
+ */
+export function BookableBlocks({
+  sessionId,
+  pollId,
+  blocks,
+  roster,
+  venues,
+  defaultVenueId,
+  minPlayersFull,
+  minPlayersShort,
+}: {
+  sessionId: string;
+  pollId: string;
+  blocks: CandidateBlock[];
+  roster: Person[];
+  venues: Venue[];
+  defaultVenueId: string | null;
+  minPlayersFull: number;
+  minPlayersShort: number;
+}) {
+  const names = new Map(roster.map((p) => [p.id, p.display_name]));
+
+  if (blocks.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+        No window yet where the same {minPlayersShort} people are free right through. Chase whoever
+        has not answered, or widen the polled hours.
+      </p>
+    );
+  }
+
+  // One row per day that has blocks, so the shape of the week is visible.
+  const byDay = new Map<string, CandidateBlock[]>();
+  for (const b of blocks) {
+    const day = instantToKl(b.start).date;
+    byDay.set(day, [...(byDay.get(day) ?? []), b]);
+  }
+
+  // A shared scale across all days, so bars are comparable by eye.
+  const dayStartMin = Math.min(
+    ...blocks.map((b) => {
+      const { time } = instantToKl(b.start);
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+    }),
+  );
+  const dayEndMin = Math.max(
+    ...blocks.map((b) => {
+      const { time } = instantToKl(b.end);
+      const [h, m] = time.split(":").map(Number);
+      const mins = h * 60 + m;
+      // An end of 00:00 belongs at the far right, not the far left.
+      return mins === 0 ? 24 * 60 : mins;
+    }),
+  );
+  const span = Math.max(60, dayEndMin - dayStartMin);
+
+  function bar(b: CandidateBlock): { left: string; width: string } {
+    const s = instantToKl(b.start).time.split(":").map(Number);
+    const e = instantToKl(b.end).time.split(":").map(Number);
+    const startMin = s[0] * 60 + s[1];
+    const endMinRaw = e[0] * 60 + e[1];
+    const endMin = endMinRaw === 0 ? 24 * 60 : endMinRaw;
+    return {
+      left: `${((startMin - dayStartMin) / span) * 100}%`,
+      width: `${Math.max(6, ((endMin - startMin) / span) * 100)}%`,
+    };
+  }
+
+  return (
+    <div className="space-y-5">
+      {[...byDay.entries()].map(([day, dayBlocks]) => {
+        const { weekday, dayOfMonth, month } = formatDayHeader(day);
+        return (
+          <div key={day}>
+            <h4 className="mb-2 text-sm font-semibold text-slate-700">
+              {weekday} {dayOfMonth} {month}
+            </h4>
+
+            <div className="relative mb-3 h-7 rounded-lg bg-slate-100">
+              {dayBlocks.map((b, i) => {
+                const { left, width } = bar(b);
+                return (
+                  <div
+                    key={i}
+                    style={{ left, width }}
+                    title={`${formatSpan(b.start, (b.end.getTime() - b.start.getTime()) / 60000)} — ${b.headcount} free`}
+                    className={`absolute top-1 flex h-5 items-center justify-center rounded text-[0.65rem] font-medium text-white ${
+                      b.tier === "full" ? "bg-emerald-600" : "bg-amber-500"
+                    }`}
+                  >
+                    {b.headcount}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-3">
+              {dayBlocks.map((b, i) => (
+                <BlockRow
+                  key={i}
+                  block={b}
+                  sessionId={sessionId}
+                  pollId={pollId}
+                  names={names}
+                  venues={venues}
+                  defaultVenueId={defaultVenueId}
+                  minPlayersFull={minPlayersFull}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BlockRow({
+  block,
+  sessionId,
+  pollId,
+  names,
+  venues,
+  defaultVenueId,
+  minPlayersFull,
+}: {
+  block: CandidateBlock;
+  sessionId: string;
+  pollId: string;
+  names: Map<string, string>;
+  venues: Venue[];
+  defaultVenueId: string | null;
+  minPlayersFull: number;
+}) {
+  const stretchMinutes = (block.end.getTime() - block.start.getTime()) / 60000;
+  const latitude = block.starts.length > 1;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{formatSpan(block.start, stretchMinutes)}</span>
+        {block.tier === "full" ? (
+          <Badge tone="green">{block.headcount} free — full session</Badge>
+        ) : (
+          <Badge tone="amber">
+            {block.headcount} free — short session (needs {minPlayersFull} for a full one)
+          </Badge>
+        )}
+      </div>
+
+      <p className="mt-1 text-xs text-slate-500">
+        Book {formatDuration(block.durationMinutes)}
+        {latitude
+          ? ` — ${block.starts.length} possible start times inside this stretch`
+          : " — only one start fits"}
+      </p>
+
+      <p className="mt-2 text-sm text-slate-600">
+        {block.people.map((id) => names.get(id) ?? id).join(", ")}
+      </p>
+
+      <form action={confirmSession} className="mt-3 flex flex-wrap items-end gap-2">
+        <input type="hidden" name="id" value={sessionId} />
+        <input type="hidden" name="poll_id" value={pollId} />
+        <input type="hidden" name="confirmed_duration_minutes" value={block.durationMinutes} />
+        <input type="hidden" name="people" value={block.people.join(",")} />
+
+        <div className="min-w-[11rem]">
+          <label className="mb-1 block text-xs text-slate-500">Start at</label>
+          <Select name="confirmed_start_at" defaultValue={block.starts[0].toISOString()}>
+            {block.starts.map((s) => (
+              <option key={s.toISOString()} value={s.toISOString()}>
+                {instantToKl(s).time} – {instantToKl(new Date(s.getTime() + block.durationMinutes * 60000)).time}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="min-w-[11rem]">
+          <label className="mb-1 block text-xs text-slate-500">Venue</label>
+          <Select name="venue_id" defaultValue={defaultVenueId ?? ""}>
+            <option value="">No venue</option>
+            {venues.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <Button type="submit">Confirm</Button>
+      </form>
+    </div>
+  );
+}

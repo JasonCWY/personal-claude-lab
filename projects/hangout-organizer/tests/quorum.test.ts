@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   computeCandidates,
   computeSlotCounts,
+  groupCandidates,
+  overlappingPeople,
   pendingResponders,
   type AvailabilityEntry,
   type QuorumRules,
@@ -181,5 +183,107 @@ describe("pendingResponders", () => {
   it("lists roster members who have not answered", () => {
     const roster = [{ id: "ali" }, { id: "ben" }, { id: "cara" }];
     expect(pendingResponders(roster, ["ben"])).toEqual([{ id: "ali" }, { id: "cara" }]);
+  });
+});
+
+describe("groupCandidates", () => {
+  const people = ["a", "b", "c", "d", "e", "f"];
+
+  function freeAcross(times: string[]): AvailabilityEntry[] {
+    return times.flatMap((t) =>
+      people.map((personId) => ({ personId, slotStart: klToInstant("2026-09-14", t) })),
+    );
+  }
+
+  it("collapses one long free stretch into a single block", () => {
+    // 19:00-22:00 free: five 2-hour candidates at 19:00, 19:30, 20:00, ...
+    const availability = freeAcross([
+      "19:00", "19:30", "20:00", "20:30", "21:00", "21:30",
+    ]);
+    const candidates = computeCandidates(availability, BADMINTON, 30);
+    expect(candidates.filter((c) => c.tier === "full").length).toBeGreaterThan(1);
+
+    const blocks = groupCandidates(candidates).filter((b) => b.tier === "full");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].start).toEqual(klToInstant("2026-09-14", "19:00"));
+    expect(blocks[0].end).toEqual(klToInstant("2026-09-14", "22:00"));
+    expect(blocks[0].headcount).toBe(6);
+    // Every legitimate start is still offered, so the host keeps the choice.
+    expect(blocks[0].starts).toHaveLength(
+      candidates.filter((c) => c.tier === "full").length,
+    );
+  });
+
+  it("keeps genuinely separate stretches apart", () => {
+    const availability = [
+      ...freeAcross(["19:00", "19:30", "20:00", "20:30"]),
+      // gap at 21:00
+      ...freeAcross(["21:30", "22:00", "22:30", "23:00"]),
+    ];
+    const blocks = groupCandidates(computeCandidates(availability, BADMINTON, 30)).filter(
+      (b) => b.tier === "full",
+    );
+    expect(blocks).toHaveLength(2);
+  });
+
+  it("never claims a headcount that nobody sustains across the block", () => {
+    // Six free 19:00-21:00; only four of them stay to 21:30.
+    const availability = [
+      ...freeAcross(["19:00", "19:30", "20:00", "20:30"]),
+      ...["21:00", "21:30"].flatMap((t) =>
+        people.slice(0, 4).map((personId) => ({
+          personId,
+          slotStart: klToInstant("2026-09-14", t),
+        })),
+      ),
+    ];
+    for (const block of groupCandidates(computeCandidates(availability, BADMINTON, 30))) {
+      expect(block.people).toHaveLength(block.headcount);
+      // Anyone credited to the block must be free at every start it offers.
+      for (const start of block.starts) {
+        const slotsInWindow = block.durationMinutes / 30;
+        for (let k = 0; k < slotsInWindow; k++) {
+          const at = new Date(start.getTime() + k * 30 * 60_000).getTime();
+          for (const personId of block.people) {
+            expect(
+              availability.some(
+                (e) => e.personId === personId && e.slotStart.getTime() === at,
+              ),
+            ).toBe(true);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe("overlappingPeople", () => {
+  const at = (t: string) => klToInstant("2026-09-14", t);
+
+  it("finds the people double-booked across two confirmed sessions", () => {
+    expect(
+      overlappingPeople(
+        { start: at("19:00"), durationMinutes: 120, people: ["a", "b", "c"] },
+        { start: at("20:00"), durationMinutes: 60, people: ["c", "a", "z"] },
+      ),
+    ).toEqual(["a", "c"]);
+  });
+
+  it("is quiet when the times do not overlap", () => {
+    expect(
+      overlappingPeople(
+        { start: at("19:00"), durationMinutes: 60, people: ["a", "b"] },
+        { start: at("20:00"), durationMinutes: 60, people: ["a", "b"] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("is quiet when the times overlap but nobody is in both", () => {
+    expect(
+      overlappingPeople(
+        { start: at("19:00"), durationMinutes: 120, people: ["a", "b"] },
+        { start: at("19:30"), durationMinutes: 60, people: ["y", "z"] },
+      ),
+    ).toEqual([]);
   });
 });

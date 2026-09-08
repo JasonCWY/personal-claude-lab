@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSlotGrid,
+  formatDayHeader,
+  formatSlotRange,
+  formatSpan,
+  spansMonths,
   defaultPollRange,
   formatDuration,
   formatKl,
@@ -165,5 +169,36 @@ describe("buildSlotGrid across midnight", () => {
     });
     expect(grid.times).toEqual(["18:00", "19:00"]);
     expect(instantToKl(grid.grid[1][0]).date).toBe("2026-09-14");
+  });
+});
+
+describe("grid display helpers", () => {
+  it("puts the month in the day header", () => {
+    expect(formatDayHeader("2026-09-14")).toEqual({
+      weekday: "Mon",
+      dayOfMonth: 14,
+      month: "Sep",
+    });
+  });
+
+  it("notices a poll that straddles a month boundary", () => {
+    expect(spansMonths(["2026-09-29", "2026-09-30", "2026-10-01"])).toBe(true);
+    expect(spansMonths(["2026-09-14", "2026-09-15"])).toBe(false);
+  });
+
+  it("labels a slot as a range, not a bare start", () => {
+    expect(formatSlotRange("19:00", 30)).toBe("19:00–19:30");
+    expect(formatSlotRange("23:30", 30)).toBe("23:30–00:00");
+    expect(formatSlotRange("19:00", 60)).toBe("19:00–20:00");
+  });
+
+  it("formats a booking span", () => {
+    expect(formatSpan(klToInstant("2026-09-15", "19:00"), 120)).toBe(
+      "Tue 15 Sep, 19:00 – 21:00",
+    );
+  });
+
+  it("flags a span that finishes the next day", () => {
+    expect(formatSpan(klToInstant("2026-09-15", "23:00"), 120)).toContain("(next day)");
   });
 });

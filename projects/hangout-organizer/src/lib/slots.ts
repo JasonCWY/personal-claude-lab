@@ -152,3 +152,50 @@ export function shiftDate(dateStr: string, days: number): string {
     shifted.getUTCDate(),
   )}`;
 }
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * Column header for a polled day: "Mon 14 Sep".
+ *
+ * The month matters — a poll can straddle one, and a bare "14" over a grid the
+ * host is reading in a hurry is genuinely ambiguous.
+ */
+export function formatDayHeader(dateStr: string): {
+  weekday: string;
+  dayOfMonth: number;
+  month: string;
+} {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
+    new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+  ];
+  return { weekday, dayOfMonth: d, month: MONTHS[m - 1] };
+}
+
+/** Whether a poll spans more than one month, so headers can say so once. */
+export function spansMonths(days: string[]): boolean {
+  return new Set(days.map((d) => d.slice(0, 7))).size > 1;
+}
+
+/** "19:00" + 30 -> "19:00–19:30". A range reads far better than a bare start. */
+export function formatSlotRange(time: string, slotMinutes: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const end = (h * 60 + m + slotMinutes) % MINUTES_PER_DAY;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${time}–${pad(Math.floor(end / 60))}:${pad(end % 60)}`;
+}
+
+/** "Tue 15 Sep, 19:00 – 21:00" for a confirmed booking or a bookable block. */
+export function formatSpan(start: Date, minutes: number): string {
+  const a = instantToKl(start);
+  const b = instantToKl(new Date(start.getTime() + minutes * MINUTE_MS));
+  const { weekday, dayOfMonth, month } = formatDayHeader(a.date);
+  const sameDay = a.date === b.date;
+  return sameDay
+    ? `${weekday} ${dayOfMonth} ${month}, ${a.time} – ${b.time}`
+    : `${weekday} ${dayOfMonth} ${month}, ${a.time} – ${b.time} (next day)`;
+}

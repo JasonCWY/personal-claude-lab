@@ -427,3 +427,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Point-in-time Supabase exports taken before a risky migration.
+.backups/

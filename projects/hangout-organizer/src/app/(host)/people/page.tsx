@@ -1,14 +1,28 @@
 import { createClient } from "@/lib/supabase/server";
-import { addPerson, deletePerson, togglePersonActive } from "@/lib/actions";
+import { addPerson, deleteGroup, deletePerson, togglePersonActive } from "@/lib/actions";
 import { Button, Card, Empty, Field, Input, PageHeader } from "@/components/ui";
-import type { Person } from "@/lib/types";
+import { GroupEditor } from "@/components/GroupEditor";
+import type { Person, RosterGroup } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function PeoplePage() {
   const supabase = await createClient();
-  const { data } = await supabase.from("people").select("*").order("display_name");
+  const [{ data }, { data: groupData }, { data: memberData }] = await Promise.all([
+    supabase.from("people").select("*").order("display_name"),
+    supabase.from("roster_groups").select("*").order("name"),
+    supabase.from("roster_group_members").select("*"),
+  ]);
   const people = (data ?? []) as Person[];
+  const activePeople = people.filter((p) => p.is_active);
+  const groups = (groupData ?? []) as RosterGroup[];
+
+  const membersByGroup = new Map<string, string[]>();
+  for (const m of memberData ?? []) {
+    const gid = m.group_id as string;
+    membersByGroup.set(gid, [...(membersByGroup.get(gid) ?? []), m.person_id as string]);
+  }
+  const nameById = new Map(people.map((p) => [p.id, p.display_name]));
 
   return (
     <>
@@ -61,6 +75,56 @@ export default async function PeoplePage() {
         Setting someone inactive hides them from new polls but keeps their past answers. Deleting
         removes their availability and attendance history too.
       </p>
+
+      <section className="mt-10">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Groups
+        </h2>
+        <p className="mb-3 text-sm text-slate-600">
+          Address a poll to a group instead of the whole roster. The members are copied onto the
+          poll when you create it, so editing a group later never changes who a running poll was
+          sent to.
+        </p>
+
+        <Card className="mb-4">
+          <h3 className="font-medium">New group</h3>
+          <GroupEditor people={activePeople} />
+        </Card>
+
+        {groups.length === 0 ? (
+          <Empty>No groups yet.</Empty>
+        ) : (
+          <div className="space-y-3">
+            {groups.map((group) => {
+              const members = membersByGroup.get(group.id) ?? [];
+              return (
+                <Card key={group.id}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="font-medium">{group.name}</span>
+                      <span className="ml-2 text-xs text-slate-500">
+                        {members.length} {members.length === 1 ? "person" : "people"}
+                      </span>
+                    </div>
+                    <form action={deleteGroup}>
+                      <input type="hidden" name="id" value={group.id} />
+                      <Button type="submit" variant="danger">
+                        Delete group
+                      </Button>
+                    </form>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {members.length
+                      ? members.map((id) => nameById.get(id) ?? id).join(", ")
+                      : "Nobody in this group yet."}
+                  </p>
+                  <GroupEditor people={activePeople} group={group} members={members} />
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </>
   );
 }

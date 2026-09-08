@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildSlotGrid, instantToKl } from "@/lib/slots";
+import { buildSlotGrid, formatDayHeader, formatSlotRange } from "@/lib/slots";
 
 interface Props {
   spec: {
@@ -74,12 +74,24 @@ export function AvailabilityGrid({ spec, selected, onChange }: Props) {
           <thead>
             <tr>
               <th className="sticky left-0 z-10 bg-slate-50 px-1 py-1" />
-              {days.map((day) => {
-                const { weekday, dayOfMonth } = instantToKl(new Date(`${day}T00:00:00Z`));
+              {days.map((day, i) => {
+                const { weekday, dayOfMonth, month } = formatDayHeader(day);
+                // Repeat the month only when it changes, so a poll crossing
+                // September into October says so exactly where it matters.
+                const showMonth = i === 0 || formatDayHeader(days[i - 1]).month !== month;
                 return (
                   <th key={day} className="px-1 py-1 font-medium text-slate-600">
-                    <div>{weekday}</div>
-                    <div className="text-slate-400">{dayOfMonth}</div>
+                    <div className="text-[0.7rem] uppercase tracking-wide text-slate-400">
+                      {weekday}
+                    </div>
+                    <div className="text-sm font-semibold text-slate-700">{dayOfMonth}</div>
+                    <div
+                      className={`text-[0.65rem] ${
+                        showMonth ? "text-slate-500" : "text-transparent"
+                      }`}
+                    >
+                      {month}
+                    </div>
                   </th>
                 );
               })}
@@ -88,8 +100,10 @@ export function AvailabilityGrid({ spec, selected, onChange }: Props) {
           <tbody>
             {times.map((time, ti) => (
               <tr key={time}>
-                <th className="sticky left-0 z-10 bg-slate-50 px-1 py-1 text-right font-normal text-slate-500">
-                  {time}
+                <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-2 py-1 text-right font-normal tabular-nums text-slate-500">
+                  <span className="text-[0.7rem]">
+                    {formatSlotRange(time, spec.slotMinutes)}
+                  </span>
                 </th>
                 {days.map((day, di) => {
                   const key = grid[ti][di].getTime();
@@ -100,7 +114,7 @@ export function AvailabilityGrid({ spec, selected, onChange }: Props) {
                         data-slot={key}
                         role="checkbox"
                         aria-checked={on}
-                        aria-label={`${day} ${time}`}
+                        aria-label={`${day} ${formatSlotRange(time, spec.slotMinutes)}`}
                         tabIndex={0}
                         style={{ touchAction: "none" }}
                         onPointerDown={(e) => {

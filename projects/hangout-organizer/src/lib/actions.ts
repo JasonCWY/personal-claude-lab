@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { newShareToken } from "@/lib/tokens";
 import { shiftDate } from "@/lib/slots";
-import type { GameSession } from "@/lib/types";
+import type { Poll } from "@/lib/types";
 
 function str(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
@@ -77,93 +77,294 @@ export async function deleteVenue(form: FormData) {
   revalidatePath("/venues");
 }
 
-// -------------------------------------------------------------- sessions ----
+// ---------------------------------------------------------------- groups ----
+
+export async function saveGroup(form: FormData) {
+  const supabase = await createClient();
+  const id = optStr(form, "id");
+  const name = str(form, "name");
+  if (!name) return;
+
+  const payload = { name, notes: optStr(form, "notes") };
+  const groupId = id
+    ? ((await supabase.from("roster_groups").update(payload).eq("id", id).select("id").single())
+        .data?.id ?? id)
+    : (await supabase.from("roster_groups").insert(payload).select("id").single()).data?.id;
+
+  if (groupId) {
+    // Membership is replaced, not merged — the form submits the complete list.
+    await supabase.from("roster_group_members").delete().eq("group_id", groupId);
+    const memberIds = form.getAll("member_ids").map(String).filter(Boolean);
+    if (memberIds.length) {
+      await supabase
+        .from("roster_group_members")
+        .insert(memberIds.map((person_id) => ({ group_id: groupId, person_id })));
+    }
+  }
+
+  revalidatePath("/people");
+}
+
+export async function deleteGroup(form: FormData) {
+  const supabase = await createClient();
+  await supabase.from("roster_groups").delete().eq("id", str(form, "id"));
+  revalidatePath("/people");
+}
+
+// ----------------------------------------------------------------- polls ----
 
 /**
- * Validate what the DB's CHECK constraints enforce, so the host gets a sentence
- * instead of a form that silently does nothing. Returns null when the input is
- * fine. Keep these in step with the `sessions_*` constraints in the migration.
+ * Mirror the DB's CHECK constraints so the host gets a sentence rather than a
+ * form that silently does nothing. Keep in step with the `polls_*` constraints.
  */
-function validateSessionForm(form: FormData): string | null {
-  const startDate = str(form, "poll_start_date");
-  const endDate = str(form, "poll_end_date");
-  if (endDate < startDate) {
+function validatePollForm(form: FormData): string | null {
+  if (str(form, "poll_end_date") < str(form, "poll_start_date")) {
     return "The 'poll until' date is before the 'poll from' date.";
   }
-
-  // An end at or before the start means the next day (22:00-00:00 is a normal
-  // evening session), so only equality is rejected — that would be 24 hours.
-  const startTime = str(form, "day_start_time");
-  const endTime = str(form, "day_end_time");
-  if (endTime === startTime) {
+  // An end at or before the start means the next day, so 22:00–00:00 is valid.
+  // Only equality is wrong: that would be a 24-hour window.
+  if (str(form, "day_end_time") === str(form, "day_start_time")) {
     return "The earliest start and latest end are the same time.";
   }
-
   const slot = Number(str(form, "slot_minutes") || 30);
-  if (slot !== 30 && slot !== 60) {
-    return "Slot size must be 30 or 60 minutes.";
+  if (![15, 30, 60].includes(slot)) {
+    return "Slot size must be 15, 30 or 60 minutes.";
   }
-
+  if (!form.getAll("session_sport_ids").map(String).filter(Boolean).length) {
+    return "Add at least one activity — a poll with nothing to book has nothing to work out.";
+  }
   return null;
 }
 
-export async function createSession(form: FormData) {
-  const problem = validateSessionForm(form);
+/**
+ * Resolve who a poll is addressed to, and freeze that list.
+ *
+ * Same principle as copying sport thresholds onto a session: editing the group
+ * afterwards must not change who a poll already running was sent to.
+ */
+async function resolveInvitees(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  form: FormData,
+): Promise<{ groupId: string | null; personIds: string[] }> {
+  const mode = str(form, "audience_mode");
+
+  if (mode === "group") {
+    const groupId = optStr(form, "group_id");
+    if (!groupId) return { groupId: null, personIds: [] };
+    const { data } = await supabase
+      .from("roster_group_members")
+      .select("person_id")
+      .eq("group_id", groupId);
+    return { groupId, personIds: (data ?? []).map((r) => r.person_id as string) };
+  }
+
+  if (mode === "people") {
+    return { groupId: null, personIds: form.getAll("person_ids").map(String).filter(Boolean) };
+  }
+
+  // "everyone" — snapshot the active roster.
+  const { data } = await supabase.from("people").select("id").eq("is_active", true);
+  return { groupId: null, personIds: (data ?? []).map((r) => r.id as string) };
+}
+
+export async function createPoll(form: FormData) {
+  const problem = validatePollForm(form);
   if (problem) {
-    redirect(`/sessions/new?error=${encodeURIComponent(problem)}`);
+    redirect(`/polls/new?error=${encodeURIComponent(problem)}`);
   }
 
   const supabase = await createClient();
-  const sportId = str(form, "sport_id");
-
-  const { data: sport } = await supabase
-    .from("sports")
-    .select("*")
-    .eq("id", sportId)
-    .single();
-  if (!sport) {
-    redirect(`/sessions/new?error=${encodeURIComponent("That sport no longer exists.")}`);
+  const { groupId, personIds } = await resolveInvitees(supabase, form);
+  if (personIds.length === 0) {
+    redirect(
+      `/polls/new?error=${encodeURIComponent(
+        "That leaves nobody to ask. Pick a group with members, or choose people individually.",
+      )}`,
+    );
   }
 
-  // Sport thresholds are DEFAULTS. They are copied onto the session so that
-  // editing the sport later never rewrites the rules of a poll already running.
-  const { data, error } = await supabase
-    .from("sessions")
+  const { data: poll, error } = await supabase
+    .from("polls")
     .insert({
-      sport_id: sportId,
-      title: str(form, "title") || `${sport.name} session`,
+      title: str(form, "title") || "Hangout poll",
       share_token: newShareToken(),
       poll_start_date: str(form, "poll_start_date"),
       poll_end_date: str(form, "poll_end_date"),
       day_start_time: str(form, "day_start_time"),
       day_end_time: str(form, "day_end_time"),
       slot_minutes: Number(str(form, "slot_minutes") || 30),
-      min_players_full: Number(str(form, "min_players_full") || sport.min_players_full),
-      full_duration_minutes: Number(
-        str(form, "full_duration_minutes") || sport.full_duration_minutes,
-      ),
-      min_players_short: Number(str(form, "min_players_short") || sport.min_players_short),
-      short_duration_minutes: Number(
-        str(form, "short_duration_minutes") || sport.short_duration_minutes,
-      ),
-      venue_id: optStr(form, "venue_id"),
+      group_id: groupId,
       notes: optStr(form, "notes"),
     })
     .select("id")
     .single();
 
-  if (error || !data) {
-    // Anything the validation above did not anticipate. Show it rather than
-    // returning silently, which renders as a button that does nothing.
-    const message = error?.message ?? "Could not create the session.";
-    redirect(`/sessions/new?error=${encodeURIComponent(message)}`);
+  if (error || !poll) {
+    const message = error?.message ?? "Could not create the poll.";
+    redirect(`/polls/new?error=${encodeURIComponent(message)}`);
   }
-  redirect(`/sessions/${data.id}`);
+
+  await supabase
+    .from("poll_invitees")
+    .insert(personIds.map((person_id) => ({ poll_id: poll.id, person_id })));
+
+  // One session per activity picked. Thresholds are copied from the sport now,
+  // so editing the sport later never rewrites a poll already running.
+  const sportIds = form.getAll("session_sport_ids").map(String).filter(Boolean);
+  const { data: sports } = await supabase.from("sports").select("*").in("id", sportIds);
+  const bySport = new Map((sports ?? []).map((s) => [s.id as string, s]));
+
+  const rows = sportIds
+    .flatMap((sportId) => {
+      const sport = bySport.get(sportId);
+      if (!sport) return [];
+      return [{
+        poll_id: poll.id,
+        sport_id: sportId,
+        title: sport.name as string,
+        min_players_full: sport.min_players_full,
+        full_duration_minutes: sport.full_duration_minutes,
+        min_players_short: sport.min_players_short,
+        short_duration_minutes: sport.short_duration_minutes,
+        venue_id: optStr(form, `venue_${sportId}`),
+      }];
+    });
+
+  if (rows.length) await supabase.from("sessions").insert(rows);
+
+  redirect(`/polls/${poll.id}`);
+}
+
+export async function setPollStatus(form: FormData) {
+  const supabase = await createClient();
+  const id = str(form, "id");
+  await supabase.from("polls").update({ status: str(form, "status") }).eq("id", id);
+  revalidatePath(`/polls/${id}`);
+}
+
+export async function updatePollNotes(form: FormData) {
+  const supabase = await createClient();
+  const id = str(form, "id");
+  await supabase.from("polls").update({ notes: optStr(form, "notes") }).eq("id", id);
+  revalidatePath(`/polls/${id}`);
+}
+
+export async function deletePoll(form: FormData) {
+  const supabase = await createClient();
+  await supabase.from("polls").delete().eq("id", str(form, "id"));
+  revalidatePath("/");
+  redirect("/");
+}
+
+/** Clone a poll with its dates pushed forward — the recurrence helper. */
+export async function duplicatePoll(form: FormData) {
+  const supabase = await createClient();
+  const shiftDays = Number(str(form, "shift_days") || 7);
+  const sourceId = str(form, "id");
+
+  const { data: original } = await supabase
+    .from("polls")
+    .select("*")
+    .eq("id", sourceId)
+    .single<Poll>();
+  if (!original) return;
+
+  const { data: poll, error } = await supabase
+    .from("polls")
+    .insert({
+      title: original.title,
+      share_token: newShareToken(),
+      poll_start_date: shiftDate(original.poll_start_date, shiftDays),
+      poll_end_date: shiftDate(original.poll_end_date, shiftDays),
+      day_start_time: original.day_start_time,
+      day_end_time: original.day_end_time,
+      slot_minutes: original.slot_minutes,
+      group_id: original.group_id,
+      notes: original.notes,
+    })
+    .select("id")
+    .single();
+
+  if (error || !poll) {
+    const message = error?.message ?? "Could not duplicate the poll.";
+    redirect(`/polls/${sourceId}?error=${encodeURIComponent(message)}`);
+  }
+
+  // Carry the invitee list and the activities across; availability starts empty.
+  const [{ data: invitees }, { data: sessions }] = await Promise.all([
+    supabase.from("poll_invitees").select("person_id").eq("poll_id", sourceId),
+    supabase.from("sessions").select("*").eq("poll_id", sourceId),
+  ]);
+
+  if (invitees?.length) {
+    await supabase
+      .from("poll_invitees")
+      .insert(invitees.map((r) => ({ poll_id: poll.id, person_id: r.person_id })));
+  }
+  if (sessions?.length) {
+    await supabase.from("sessions").insert(
+      sessions.map((s) => ({
+        poll_id: poll.id,
+        sport_id: s.sport_id,
+        title: s.title,
+        min_players_full: s.min_players_full,
+        full_duration_minutes: s.full_duration_minutes,
+        min_players_short: s.min_players_short,
+        short_duration_minutes: s.short_duration_minutes,
+        venue_id: s.venue_id,
+      })),
+    );
+  }
+
+  redirect(`/polls/${poll.id}`);
+}
+
+// -------------------------------------------------------------- sessions ----
+
+export async function addSessionToPoll(form: FormData) {
+  const supabase = await createClient();
+  const pollId = str(form, "poll_id");
+  const sportId = str(form, "sport_id");
+
+  const { data: sport } = await supabase.from("sports").select("*").eq("id", sportId).single();
+  if (!sport) return;
+
+  await supabase.from("sessions").insert({
+    poll_id: pollId,
+    sport_id: sportId,
+    title: str(form, "title") || sport.name,
+    min_players_full: sport.min_players_full,
+    full_duration_minutes: sport.full_duration_minutes,
+    min_players_short: sport.min_players_short,
+    short_duration_minutes: sport.short_duration_minutes,
+  });
+
+  revalidatePath(`/polls/${pollId}`);
+}
+
+export async function updateSessionRules(form: FormData) {
+  const supabase = await createClient();
+  const pollId = str(form, "poll_id");
+
+  await supabase
+    .from("sessions")
+    .update({
+      title: str(form, "title"),
+      min_players_full: Number(str(form, "min_players_full")),
+      full_duration_minutes: Number(str(form, "full_duration_minutes")),
+      min_players_short: Number(str(form, "min_players_short")),
+      short_duration_minutes: Number(str(form, "short_duration_minutes")),
+      venue_id: optStr(form, "venue_id"),
+    })
+    .eq("id", str(form, "id"));
+
+  revalidatePath(`/polls/${pollId}`);
 }
 
 export async function confirmSession(form: FormData) {
-  const id = str(form, "id");
   const supabase = await createClient();
+  const id = str(form, "id");
+  const pollId = str(form, "poll_id");
 
   await supabase
     .from("sessions")
@@ -181,69 +382,38 @@ export async function confirmSession(form: FormData) {
     .map((p) => p.trim())
     .filter(Boolean);
 
+  await supabase.from("attendees").delete().eq("session_id", id);
   if (personIds.length) {
-    await supabase.from("attendees").delete().eq("session_id", id);
     await supabase
       .from("attendees")
-      .insert(personIds.map((pid) => ({ session_id: id, person_id: pid, status: "in" })));
+      .insert(personIds.map((person_id) => ({ session_id: id, person_id })));
   }
 
-  revalidatePath(`/sessions/${id}`);
+  revalidatePath(`/polls/${pollId}`);
   revalidatePath("/calendar");
-  revalidatePath("/");
+}
+
+export async function unconfirmSession(form: FormData) {
+  const supabase = await createClient();
+  const id = str(form, "id");
+  await supabase
+    .from("sessions")
+    .update({ status: "planning", confirmed_start_at: null, confirmed_duration_minutes: null })
+    .eq("id", id);
+  await supabase.from("attendees").delete().eq("session_id", id);
+  revalidatePath(`/polls/${str(form, "poll_id")}`);
+  revalidatePath("/calendar");
 }
 
 export async function setSessionStatus(form: FormData) {
-  const id = str(form, "id");
   const supabase = await createClient();
-  await supabase.from("sessions").update({ status: str(form, "status") }).eq("id", id);
-  revalidatePath(`/sessions/${id}`);
-  revalidatePath("/");
+  await supabase.from("sessions").update({ status: str(form, "status") }).eq("id", str(form, "id"));
+  revalidatePath(`/polls/${str(form, "poll_id")}`);
+  revalidatePath("/calendar");
 }
 
 export async function deleteSession(form: FormData) {
   const supabase = await createClient();
   await supabase.from("sessions").delete().eq("id", str(form, "id"));
-  revalidatePath("/");
-  redirect("/");
-}
-
-/** Clone last week's session with dates pushed forward — the recurrence helper. */
-export async function duplicateSession(form: FormData) {
-  const supabase = await createClient();
-  const shiftDays = Number(str(form, "shift_days") || 7);
-
-  const { data: original } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("id", str(form, "id"))
-    .single<GameSession>();
-  if (!original) return;
-
-  const { data, error } = await supabase
-    .from("sessions")
-    .insert({
-      sport_id: original.sport_id,
-      title: original.title,
-      share_token: newShareToken(),
-      poll_start_date: shiftDate(original.poll_start_date, shiftDays),
-      poll_end_date: shiftDate(original.poll_end_date, shiftDays),
-      day_start_time: original.day_start_time,
-      day_end_time: original.day_end_time,
-      slot_minutes: original.slot_minutes,
-      min_players_full: original.min_players_full,
-      full_duration_minutes: original.full_duration_minutes,
-      min_players_short: original.min_players_short,
-      short_duration_minutes: original.short_duration_minutes,
-      venue_id: original.venue_id,
-      notes: original.notes,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data) {
-    const message = error?.message ?? "Could not duplicate the session.";
-    redirect(`/sessions/${original.id}?error=${encodeURIComponent(message)}`);
-  }
-  redirect(`/sessions/${data.id}`);
+  revalidatePath(`/polls/${str(form, "poll_id")}`);
 }

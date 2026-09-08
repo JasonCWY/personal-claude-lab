@@ -1,4 +1,4 @@
-import { buildSlotGrid, instantToKl } from "@/lib/slots";
+import { buildSlotGrid, formatDayHeader, formatSlotRange } from "@/lib/slots";
 import type { Person } from "@/lib/types";
 
 /**
@@ -44,12 +44,22 @@ export function HeatmapGrid({
         <thead>
           <tr>
             <th className="sticky left-0 bg-white px-2 py-1" />
-            {days.map((day) => {
-              const { weekday, dayOfMonth } = instantToKl(new Date(`${day}T00:00:00Z`));
+            {days.map((day, i) => {
+              const { weekday, dayOfMonth, month } = formatDayHeader(day);
+              const showMonth = i === 0 || formatDayHeader(days[i - 1]).month !== month;
               return (
                 <th key={day} className="px-2 py-1 font-medium text-slate-600">
-                  <div>{weekday}</div>
-                  <div className="text-slate-400">{dayOfMonth}</div>
+                  <div className="text-[0.7rem] uppercase tracking-wide text-slate-400">
+                    {weekday}
+                  </div>
+                  <div className="text-sm font-semibold text-slate-700">{dayOfMonth}</div>
+                  <div
+                    className={`text-[0.65rem] ${
+                      showMonth ? "text-slate-500" : "text-transparent"
+                    }`}
+                  >
+                    {month}
+                  </div>
                 </th>
               );
             })}
@@ -58,19 +68,19 @@ export function HeatmapGrid({
         <tbody>
           {times.map((time, ti) => (
             <tr key={time}>
-              <th className="sticky left-0 bg-white px-2 py-1 text-right font-normal text-slate-500">
-                {time}
+              <th className="sticky left-0 whitespace-nowrap bg-white px-2 py-1 text-right font-normal tabular-nums text-slate-500">
+                <span className="text-[0.7rem]">{formatSlotRange(time, spec.slotMinutes)}</span>
               </th>
               {days.map((day, di) => {
                 const people = slotCounts.get(grid[ti][di].getTime()) ?? [];
                 return (
                   <td
                     key={day}
-                    title={
+                    title={`${formatSlotRange(time, spec.slotMinutes)} — ${
                       people.length
                         ? people.map((id) => names.get(id) ?? id).join(", ")
-                        : "Nobody free"
-                    }
+                        : "nobody free"
+                    }`}
                     className={`h-8 min-w-[2.75rem] rounded font-medium ${shade(people.length)}`}
                   >
                     {people.length || ""}

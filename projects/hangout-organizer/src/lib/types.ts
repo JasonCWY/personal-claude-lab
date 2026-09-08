@@ -28,19 +28,52 @@ export interface Person {
   is_active: boolean;
 }
 
-export type SessionStatus = "polling" | "confirmed" | "cancelled" | "completed";
-
-export interface GameSession {
+export interface RosterGroup {
   id: string;
-  sport_id: string;
+  name: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface RosterGroupMember {
+  group_id: string;
+  person_id: string;
+}
+
+export type PollStatus = "polling" | "closed";
+
+/**
+ * A poll owns the window being asked about and the share link.
+ *
+ * Availability hangs off this, not off a session, because whether someone is
+ * free on Tuesday has nothing to do with which sport is being planned. One
+ * poll can carry a badminton session and a pickleball session, both scored
+ * against the same answers.
+ */
+export interface Poll {
+  id: string;
   title: string;
-  status: SessionStatus;
   share_token: string;
+  status: PollStatus;
   poll_start_date: string;
   poll_end_date: string;
   day_start_time: string;
   day_end_time: string;
   slot_minutes: number;
+  group_id: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export type SessionStatus = "planning" | "confirmed" | "cancelled" | "completed";
+
+/** A thing you are trying to book, within a poll. */
+export interface GameSession {
+  id: string;
+  poll_id: string;
+  sport_id: string;
+  title: string;
+  status: SessionStatus;
   min_players_full: number;
   full_duration_minutes: number;
   min_players_short: number;
@@ -53,16 +86,21 @@ export interface GameSession {
 }
 
 export interface AvailabilityRow {
-  session_id: string;
+  poll_id: string;
   person_id: string;
   slot_start: string;
 }
 
-export interface SessionResponse {
-  session_id: string;
+export interface PollResponse {
+  poll_id: string;
   person_id: string;
   submitted_at: string;
   comment: string | null;
+}
+
+export interface PollInvitee {
+  poll_id: string;
+  person_id: string;
 }
 
 export type EventStatus = "planning" | "confirmed" | "done" | "cancelled";

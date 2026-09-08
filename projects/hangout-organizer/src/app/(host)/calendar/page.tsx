@@ -33,7 +33,7 @@ export default async function CalendarPage({
     const kl = instantToKl(new Date(s.confirmed_start_at));
     entries.push({
       id: `s-${s.id}`,
-      href: `/sessions/${s.id}`,
+      href: `/polls/${s.poll_id}`,
       date: kl.date,
       label: `${kl.time} ${s.title}`,
       tone: "session",

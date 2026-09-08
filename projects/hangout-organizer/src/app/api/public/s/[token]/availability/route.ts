@@ -1,22 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { buildSlotGrid } from "@/lib/slots";
-import type { GameSession } from "@/lib/types";
+import type { Poll } from "@/lib/types";
+
+const MAX_SLOTS = 2000;
+const MAX_COMMENT = 500;
 
 /**
  * Public availability submission.
  *
- * Uses the service_role key, so it must do its own authorisation. Three checks,
- * all necessary:
- *  1. The share token must resolve to a session that is still polling.
- *  2. The person must be on that roster and active — you cannot submit as a
- *     name the host never added.
- *  3. Every slot must be one the poll actually offers, so a crafted request
- *     cannot inject availability outside the polled window and skew the quorum.
+ * Uses the secret key, so it must do its own authorisation. Four checks, all
+ * necessary:
+ *  1. The share token must resolve to a poll that is still open.
+ *  2. The person must be INVITED TO THIS POLL — not merely on the roster.
+ *     A poll addressed to the badminton group must not accept an answer from
+ *     someone who was never asked.
+ *  3. That person must still be active.
+ *  4. Every slot must be one the poll actually offers, so a crafted request
+ *     cannot inject availability outside the window and skew the quorum.
  */
-const MAX_SLOTS = 2000;
-const MAX_COMMENT = 500;
-
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> },
@@ -35,9 +37,7 @@ export async function POST(
   if (!personId) {
     return NextResponse.json({ error: "personId is required" }, { status: 400 });
   }
-  // This endpoint is open to anyone holding the link, so bound the inputs before
-  // any of them reach the database. The grid can never legitimately exceed a few
-  // hundred slots, and the comment is a one-line note to the host.
+  // Open to anyone holding the link, so bound the inputs before the database.
   if (slots.length > MAX_SLOTS) {
     return NextResponse.json({ error: "Too many slots" }, { status: 400 });
   }
@@ -46,16 +46,26 @@ export async function POST(
 
   const supabase = createServiceClient();
 
-  const { data: session } = await supabase
-    .from("sessions")
+  const { data: poll } = await supabase
+    .from("polls")
     .select("*")
     .eq("share_token", token)
-    .maybeSingle<GameSession>();
-  if (!session) {
+    .maybeSingle<Poll>();
+  if (!poll) {
     return NextResponse.json({ error: "Unknown poll" }, { status: 404 });
   }
-  if (session.status !== "polling") {
+  if (poll.status !== "polling") {
     return NextResponse.json({ error: "This poll is closed" }, { status: 409 });
+  }
+
+  const { data: invited } = await supabase
+    .from("poll_invitees")
+    .select("person_id")
+    .eq("poll_id", poll.id)
+    .eq("person_id", personId)
+    .maybeSingle();
+  if (!invited) {
+    return NextResponse.json({ error: "You were not asked to this one" }, { status: 403 });
   }
 
   const { data: person } = await supabase
@@ -70,11 +80,11 @@ export async function POST(
 
   const valid = new Set(
     buildSlotGrid({
-      pollStartDate: session.poll_start_date,
-      pollEndDate: session.poll_end_date,
-      dayStartTime: session.day_start_time,
-      dayEndTime: session.day_end_time,
-      slotMinutes: session.slot_minutes,
+      pollStartDate: poll.poll_start_date,
+      pollEndDate: poll.poll_end_date,
+      dayStartTime: poll.day_start_time,
+      dayEndTime: poll.day_end_time,
+      slotMinutes: poll.slot_minutes,
     })
       .grid.flat()
       .map((d) => d.getTime()),
@@ -89,16 +99,12 @@ export async function POST(
 
   // Replace rather than merge: the grid submits the person's full answer, so a
   // cleared slot must actually disappear.
-  await supabase
-    .from("availability")
-    .delete()
-    .eq("session_id", session.id)
-    .eq("person_id", personId);
+  await supabase.from("availability").delete().eq("poll_id", poll.id).eq("person_id", personId);
 
   if (accepted.length) {
     const { error } = await supabase.from("availability").insert(
       accepted.map((ms) => ({
-        session_id: session.id,
+        poll_id: poll.id,
         person_id: personId,
         slot_start: new Date(ms).toISOString(),
       })),
@@ -108,14 +114,14 @@ export async function POST(
     }
   }
 
-  await supabase.from("session_responses").upsert(
+  await supabase.from("poll_responses").upsert(
     {
-      session_id: session.id,
+      poll_id: poll.id,
       person_id: personId,
       submitted_at: new Date().toISOString(),
       comment,
     },
-    { onConflict: "session_id,person_id" },
+    { onConflict: "poll_id,person_id" },
   );
 
   return NextResponse.json({ ok: true, saved: accepted.length });
