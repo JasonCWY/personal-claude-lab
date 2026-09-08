@@ -1,53 +1,74 @@
-hangout-organizer — status after the 2026-09-08 session.
+hangout-organizer — status at the end of the 2026-09-08 session.
 
-LIVE AND WORKING. Supabase project koenkkrybqfgszisuabz, migrations 001–003 all run,
-host signed in, dev server on http://localhost:3000.
+WORKING LOCALLY, NOT YET DEPLOYED. Supabase project koenkkrybqfgszisuabz, migrations 001–005 all
+run, host signed in, dev server on http://localhost:3000. Test data cleared; roster and sports kept.
 
-THE BIG CHANGE THIS SESSION: restructured around POLLS.
+DEPLOY IS THE ONLY THING LEFT. Steps, in order:
+  1. `git push origin main`  — 11 commits were still unpushed at the end of the session.
+     (Claude could not run this; the permission classifier blocks push.)
+  2. Vercel -> New Project -> this repo -> ROOT DIRECTORY: projects/hangout-organizer
+  3. Vercel env vars (values are in projects/hangout-organizer/.env.local, which is gitignored):
+       NEXT_PUBLIC_SUPABASE_URL
+       NEXT_PUBLIC_SUPABASE_ANON_KEY        (publishable key)
+       SUPABASE_SERVICE_ROLE_KEY            (secret key)
+       HOST_EMAIL
+       NEXT_PUBLIC_SITE_URL  <- MUST be the Vercel URL, not localhost. Share links are built
+                                from it, so leaving it as localhost pastes dead links into
+                                the group chat.
+  4. Supabase -> Authentication -> URL Configuration: add https://<app>.vercel.app/auth/callback
+     alongside the localhost one.
+  5. Sign in on the deployed URL and make a real poll.
 
-A poll owns the window + share token. Sessions hang off it as the things being booked, each with
-its own quorum rule. Availability belongs to the POLL, not the session — because whether someone
-is free on Tuesday has nothing to do with which sport is planned. Consequences:
-  - Badminton and pickleball over the same dates = ONE link, ONE grid, both scored.
-  - Adding an activity to a running poll needs nobody to re-answer.
-  - Clash detection is possible at all: overlappingPeople() warns when two confirmed sessions
-    overlap in time with the same people in both.
+WHAT THE APP DOES NOW (all built this session, on top of the original build):
 
-Also added:
-  - Roster GROUPS. Poll addressed to everyone / a group / hand-picked people. The resolved list is
-    FROZEN onto the poll (poll_invitees) — editing a group later never changes who a running poll
-    went to. Public page lists only invitees; the write endpoint rejects anyone else.
-  - groupCandidates() collapses overlapping bookable windows. A 3-hour free stretch was showing as
-    five near-identical rows; now one block with the start times inside it, drawn as bars on a
-    per-day timeline. Merging stops where the sustained headcount would drop.
-  - Editable WhatsApp message preview before copying.
-  - Grid: month in the day header (repeated only where it changes), row labels are slot RANGES
-    (19:00–19:30) not bare starts, 15-minute slots allowed.
-  - Overnight windows: day_end_time <= day_start_time means the next day. 22:00–00:00 works.
+  Polls, not sessions. A poll owns the window + share token; sessions hang off it as the things
+  being booked, each with its own quorum rule, ALL scored against one set of answers. Badminton and
+  pickleball over the same dates = one link, one grid. Adding an activity to a running poll needs
+  nobody to re-answer.
 
-Verified: 41/41 tests, tsc clean, 17 routes build, migration preserved all live data
-(95 availability rows, 6 responses, share_token unchanged so the link already sent still works).
-Pre-migration export in .backups/hangout-20260908-224945/ (gitignored).
+  Per-activity opt-in. A poll with >1 activity asks friends "which of these are you up for?".
+  Stored as opt-OUTS (absence = in) to preserve the no-re-answer property. The host page names
+  anyone who opted out, and separately names anyone who answered BEFORE an activity was added —
+  they are being counted without having said yes.
 
-Current data: 1 poll ("test", 11–13 Sep, 15:00–00:00, 60min slots), 6 of 11 people active and all
-6 have answered, 1 activity, 0 venues.
+  Roster groups. Poll addressed to everyone / a group / hand-picked. Resolved list FROZEN onto the
+  poll at creation, same rule as sport thresholds being copied.
 
-TWO GOTCHAS WORTH REMEMBERING:
-1. Create the host auth user BEFORE disabling public signups. signInWithOtp defaults to
-   shouldCreateUser:true, so on a fresh project with signups off nobody can ever get in.
-2. Never paste real keys into .env.local.example — that file is TRACKED. They go in .env.local.
-   Also: adding a new secret key does NOT revoke the legacy service_role JWT; disable legacy keys
-   explicitly under Settings → API Keys.
+  Date-only polls. "Which dates suit the trip?" — modelled as a poll whose slot is one whole day,
+  so the quorum engine is untouched. sport_id is nullable for these.
 
-Dev server gotcha: stopping the npm task leaves the node child holding port 3000, so a restart
-silently lands on 3001 and you end up testing the OLD build. Kill the PID on the port. Also, after
-editing several shared modules, the dev bundler can corrupt — delete .next and restart.
+  Grouped bookable windows. A 3-hour free stretch was showing as five near-identical rows; now one
+  block with the start times inside it, drawn as bars on a per-day timeline. Merging stops where
+  the sustained headcount would drop.
 
-NEXT UP:
-  - Add a venue (0 so far) so a confirmed session has a booking link.
+  Clash warning between two confirmed sessions in the same poll that share people.
+
+  WhatsApp: editable message preview, an "Open in WhatsApp" wa.me deep link, URL alone on the last
+  line so WhatsApp linkifies it, and a warning while SITE_URL is still localhost.
+
+  Overnight windows (22:00–00:00, 21:00–01:00). Grid headers carry the month; row labels are slot
+  ranges. 15-minute slots.
+
+STATE: 51/51 tests, tsc clean, 17 routes build. 0 polls, 11 people, 1 group ("Everyone", 6
+members), 2 sports, 0 VENUES (add one so a confirmed session has a booking link).
+
+NEXT, AFTER DEPLOY:
+  - Add a venue.
   - The real end-to-end test: enough people filling a poll that a 2-hour window qualifies, then
-    the drag grid on an actual phone before the link goes in the group chat.
-  - reader-assistant is still on the deleted Supabase project — it was never migrated and its
-    tables never existed. User said to ignore it for now.
+    the drag grid on an actual phone.
+  - Possible option 2 on activity preference (keen / will play / only if short) IF you find
+    yourself often choosing between two windows that both hit quorum. It touches the engine, so
+    only do it if the need is real.
 
-Note node is at C:\Program Files\nodejs (on PATH in PowerShell, not in the Bash tool).
+GOTCHAS WORTH KEEPING:
+  1. Create the host auth user BEFORE disabling public signups, or nobody can ever sign in.
+  2. Never paste real keys into .env.local.example — it is TRACKED. Use .env.local.
+  3. A new sb_secret_ key does NOT revoke the legacy service_role JWT. Disable legacy keys
+     explicitly under Settings -> API Keys.
+  4. Stopping the npm dev task leaves the node child on port 3000, so a restart silently lands on
+     3001 and you test the OLD build. Kill the PID on the port.
+  5. After editing several shared modules the dev bundler can corrupt — delete .next and restart.
+  6. Free-tier Supabase projects auto-pause after ~a week idle.
+
+Backups from this session: .backups/ (gitignored) — pre-migration and pre-clear snapshots.
+Node is at C:\Program Files\nodejs (on PATH in PowerShell, not in the Bash tool).
