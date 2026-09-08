@@ -24,10 +24,16 @@ Next.js (App Router) · Supabase Postgres · Vercel · Tailwind. All on free tie
 1. **Create a new Supabase project.** Use a dedicated one, not the project shared by
    `debt-tracker` / `reader-assistant` — this app publishes an anon key to the browser and those
    two run with RLS disabled.
-2. Run `migrations/001_initial_schema.sql` in that project's SQL editor.
+2. Open `migrations/001_initial_schema.sql`, replace `you@example.com` near the bottom with your
+   own address (it must match `HOST_EMAIL`), then run the whole file in that project's SQL editor.
+   That address is what the RLS policies check — leave the placeholder in and every page comes up
+   empty.
 3. In Supabase → Authentication → URL Configuration, add `http://localhost:3000/auth/callback`
    (and later your Vercel URL) to the redirect allowlist.
-4. Copy the env template and fill it in:
+4. In Supabase → Authentication → Sign In / Providers, turn **off** "Allow new users to sign up".
+   The anon key is public, so without this anyone can create a user in your project. They still
+   could not read anything (see step 2), but there is no reason to let them try.
+5. Copy the env template and fill it in:
 
    ```bash
    cp .env.local.example .env.local
@@ -36,7 +42,7 @@ Next.js (App Router) · Supabase Postgres · Vercel · Tailwind. All on free tie
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`
    come from Supabase → Project Settings → API. `HOST_EMAIL` is the only address allowed to sign in.
 
-5. Install and run:
+6. Install and run:
 
    ```bash
    npm install

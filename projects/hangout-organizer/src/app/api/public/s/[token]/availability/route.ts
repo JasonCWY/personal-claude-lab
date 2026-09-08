@@ -14,6 +14,9 @@ import type { GameSession } from "@/lib/types";
  *  3. Every slot must be one the poll actually offers, so a crafted request
  *     cannot inject availability outside the polled window and skew the quorum.
  */
+const MAX_SLOTS = 2000;
+const MAX_COMMENT = 500;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> },
@@ -32,6 +35,14 @@ export async function POST(
   if (!personId) {
     return NextResponse.json({ error: "personId is required" }, { status: 400 });
   }
+  // This endpoint is open to anyone holding the link, so bound the inputs before
+  // any of them reach the database. The grid can never legitimately exceed a few
+  // hundred slots, and the comment is a one-line note to the host.
+  if (slots.length > MAX_SLOTS) {
+    return NextResponse.json({ error: "Too many slots" }, { status: 400 });
+  }
+  const comment =
+    typeof body.comment === "string" ? body.comment.trim().slice(0, MAX_COMMENT) || null : null;
 
   const supabase = createServiceClient();
 
@@ -102,7 +113,7 @@ export async function POST(
       session_id: session.id,
       person_id: personId,
       submitted_at: new Date().toISOString(),
-      comment: body.comment ?? null,
+      comment,
     },
     { onConflict: "session_id,person_id" },
   );

@@ -12,7 +12,14 @@ import { HOST_EMAIL } from "@/lib/env";
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  // `next` comes back from the magic link, so it is attacker-controllable. A
+  // leading // (or /-backslash) is protocol-relative and would send the freshly
+  // signed-in host off to another origin, so require a single leading slash.
+  const requested = searchParams.get("next") ?? "/";
+  const next =
+    requested.startsWith("/") && requested[1] !== "/" && requested[1] !== "\\"
+      ? requested
+      : "/";
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`);
@@ -30,5 +37,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=not_host`);
   }
 
-  return NextResponse.redirect(`${origin}${next.startsWith("/") ? next : "/"}`);
+  return NextResponse.redirect(`${origin}${next}`);
 }

@@ -171,12 +171,41 @@ create index if not exists checklist_template_items_tpl_idx
 -- ---------------------------------------------------------------------------
 -- Row Level Security
 --
--- Single-host app: any authenticated user (and only your allowlisted email can
--- ever get a session) has full access. `anon` gets NO policies at all, so the
--- anon key shipped to the browser can read nothing directly. Every public share
--- page goes through a server route handler using the service_role key, which
--- bypasses RLS.
+-- The anon key and the project URL are both shipped to the browser, so Supabase's
+-- auth endpoints are reachable by anyone who views source. A stranger can request
+-- a magic link for their OWN address straight from the Supabase API, never
+-- touching this app, and end up holding a valid `authenticated` JWT. The app's
+-- own gates (auth/callback signing non-hosts out, the (host) layout re-check)
+-- do nothing about that — PostgREST would still answer that JWT.
+--
+-- So the policies must name the host, not merely "any authenticated user".
+-- `anon` gets no policies at all; the public /s/ and /e/ pages read and write
+-- through server route handlers on the service_role key, which bypasses RLS.
 -- ---------------------------------------------------------------------------
+
+-- Who counts as the host. RLS is enabled with NO policies, so this table is
+-- invisible to `anon` and `authenticated` alike — only service_role and the
+-- security-definer function below can read it.
+create table if not exists host_allowlist (
+  email text primary key
+);
+alter table host_allowlist enable row level security;
+
+-- SECURITY DEFINER so the policy can consult host_allowlist without the caller
+-- needing to see it. `search_path` is pinned so the body cannot be hijacked by
+-- a schema the caller controls.
+create or replace function public.is_host()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $fn$
+  select exists (
+    select 1 from public.host_allowlist
+    where email = lower(coalesce(auth.jwt() ->> 'email', ''))
+  );
+$fn$;
 
 do $$
 declare t text;
@@ -188,9 +217,17 @@ begin
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists host_all on %I', t);
     execute format(
-      'create policy host_all on %I for all to authenticated using (true) with check (true)', t);
+      'create policy host_all on %I for all to authenticated '
+      'using (public.is_host()) with check (public.is_host())', t);
   end loop;
 end $$;
+
+-- >>> EDIT THIS LINE before running the migration. <<<
+-- Must match HOST_EMAIL in .env.local, lower-case. Until a row exists here,
+-- every table is closed to everyone and the dashboard will come up empty.
+insert into host_allowlist (email)
+values (lower('you@example.com'))
+on conflict (email) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- Seed

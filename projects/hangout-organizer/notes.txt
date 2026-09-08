@@ -1,23 +1,44 @@
-projects/hangout-organizer is built — ~4,000 lines across 52 files. Everything I can verify without a live database passes.
+hangout-organizer — status after the 2026-09-08 review pass.
 
-Verified:
-- npm test — 26/26 passing (quorum engine + KL slot maths)
-- npx tsc --noEmit — clean
-- npm run build — all 17 routes compile
-- Dev server boots; /, /venues, /calendar → 307 to /login; /s/… and /e/… reachable with no session; public API routes return 400s on bad input
+Still true from last time: ~4,000 lines across 52 files, npm test 26/26, npx tsc --noEmit clean,
+npm run build compiles all 17 routes. The code is committed (5cf14ef) — the last note saying
+"nothing is committed yet" was written just before the commit.
 
-The core piece is src/lib/quorum.ts:76 — pure, no framework imports, tested first, same rule as debt-tracker's calculator.py. It scores each window on the intersection of its slots, so six people at 19:00 plus a different six at 20:00 correctly yields no 2-hour block. That case has its own test (tests/quorum.test.ts:77).
+This session was a review of the deployed-app surface. Three things changed.
 
-Two things worth flagging:
+1. RLS was scoped to the host, and this was a real hole, not a tidy-up.
+   The old policy was `for all to authenticated using (true)`. The anon key and the project URL
+   both ship in the browser bundle, so a stranger can POST to Supabase's own auth endpoint, get a
+   magic link for their OWN address, and hold a valid `authenticated` JWT without ever loading
+   this app. From there PostgREST would have handed them every table. The app-side gates
+   (auth/callback signing non-hosts out, the (host) layout re-check) never see that request.
+   The migration now creates a `host_allowlist` table (RLS on, zero policies, so nothing but
+   service_role can read it) and an `is_host()` SECURITY DEFINER function with a pinned
+   search_path; every policy is `using (is_host())`.
+   => You must replace `you@example.com` near the bottom of the migration with your real address
+      before running it. It has to match HOST_EMAIL. Leave the placeholder and every page is empty.
 
-1. Use a new Supabase project. Not the one debt-tracker and reader-assistant share. Those run with RLS off because they're local; this app publishes an anon key to the browser, so co-locating would expose your bills and reading notes to anyone who opened the page. Worth confirming your free tier has room for a second project before you start. This is written into both CLAUDE.md files.
-2. One deviation from the approved plan: I used Next.js server actions for host mutations instead of the api/sessions/[id]/… route handlers the plan sketched. Route handlers are still there for the public writes, where they're needed — a friend has no session, so those endpoints authorise themselves against the share token. For host actions the session cookie already does that work, and a route handler would just be indirection.
+2. Open redirect in auth/callback/route.ts. `next` comes back from the magic link, and
+   `next.startsWith("/")` also passes `//evil.com`, which browsers read as protocol-relative.
+   Now rejects a second leading slash or backslash.
+
+3. Input caps on api/public/s/[token]/availability. That endpoint is open to anyone with the
+   link; `comment` was unbounded. Now MAX_SLOTS 2000, MAX_COMMENT 500.
+
+Deliberately NOT changed: `shouldCreateUser` on the login form stays true. Setting it false is
+security theatre — an attacker never uses our client. The real control is the Supabase dashboard
+toggle, which is now step 4 of the README.
 
 Your next steps — I can't run these for you:
-1. Create the Supabase project, run migrations/001_initial_schema.sql in its SQL editor.
-2. Add http://localhost:3000/auth/callback to Supabase → Authentication → URL Configuration.
-3. cp .env.local.example .env.local, fill in the three Supabase values.
-4. npm run dev, sign in, then walk the flow in README.md § First run.
-                                                                                                                                                                                                                                        Note node isn't on your shell PATH — it's at C:\Program Files\nodejs.
+1. Create the new Supabase project (NOT the one debt-tracker/reader-assistant share).
+2. Edit `you@example.com` in migrations/001_initial_schema.sql, then run the whole file.
+3. Authentication -> URL Configuration: add http://localhost:3000/auth/callback
+4. Authentication -> Sign In / Providers: turn OFF "Allow new users to sign up".
+5. cp .env.local.example .env.local, fill in the three Supabase values + HOST_EMAIL.
+6. npm run dev, sign in, walk README.md § First run.
 
-The end-to-end checks from the plan (six people filling a poll until a 2-hour window qualifies, then the phone test on the drag grid) still need a real database. Tell me when the migration's run and I'll walk through them with you. Nothing is committed yet.
+Note node isn't on PATH — it's at C:\Program Files\nodejs.
+
+Still outstanding, needs a live database: the end-to-end checks from the plan — six people filling
+a poll until a 2-hour window qualifies, then the phone test on the drag grid. Tell me when the
+migration's run and we'll walk them together.

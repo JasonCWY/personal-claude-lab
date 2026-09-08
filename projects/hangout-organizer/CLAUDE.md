@@ -81,7 +81,9 @@ src/
   the rules of a poll already running.
 - **Public pages have no Supabase session, so route handlers authorise themselves.** Every handler
   under `api/public/` re-derives the session/event from the share token and validates that the
-  person is on the roster and the slots are inside the polled window. Never trust the client body.
+  person is on the roster and the slots are inside the polled window. Never trust the client body,
+  and bound every field before it reaches the database — these endpoints are open to anyone with
+  the link.
 - **The friend-facing grid replaces, it does not merge.** A submission is that person's complete
   answer, so cleared slots must actually disappear.
 - **Times are `timestamptz` UTC in the DB, rendered in Asia/Kuala_Lumpur at the edges.**
@@ -98,9 +100,18 @@ host, and `(host)/layout.tsx` re-checks on every render.
 
 ## Database Setup
 
-Create a **new** Supabase project, then run `migrations/001_initial_schema.sql` in its SQL editor.
-It creates the tables, enables RLS with an `authenticated`-only policy, and seeds the two sports
-plus three built-in checklist templates.
+Create a **new** Supabase project. Before running `migrations/001_initial_schema.sql`, replace the
+`you@example.com` placeholder near the bottom with the host address — it must match `HOST_EMAIL`.
+The migration creates the tables, enables RLS, and seeds the two sports plus three built-in
+checklist templates.
+
+**RLS is scoped to the host by email, not to `authenticated`.** The anon key and project URL both
+ship to the browser, so anyone can drive Supabase's auth endpoints directly and obtain a valid
+`authenticated` JWT without ever loading this app. `auth/callback` signing non-hosts out and the
+`(host)` layout re-check guard the *app*; they do nothing for PostgREST. The `host_allowlist` table
+plus the `is_host()` security-definer function are what guard the *data*. If you ever add a table,
+add it to the policy loop — a table with RLS on and no policy is closed, which fails safe, but a
+table with the old `using (true)` policy would be open to any signed-up stranger.
 
 ## Deploying
 
