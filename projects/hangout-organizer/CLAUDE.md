@@ -138,6 +138,22 @@ See `.env.local.example`. `HOST_EMAIL` is the real gate — Supabase will mint a
 address that completes a magic link, so `auth/callback/route.ts` signs out anyone who is not the
 host, and `(host)/layout.tsx` re-checks on every render.
 
+## Sign-in
+
+Password by default, magic link as a fallback. The link round trip — switch to the inbox, wait,
+tap, come back — is tedious for the one person who signs in here several times a week, and it adds
+nothing: `HOST_EMAIL` plus the `host_allowlist` RLS check are what actually gate this app, not the
+delivery mechanism.
+
+The host user is created without a password (originally there was only the link flow), so run
+`node scripts/set-host-password.mjs` once to add one. It prompts with the input hidden so the
+password never lands in shell history.
+
+**Creating the host user must happen BEFORE disabling public signups in the Supabase dashboard.**
+`signInWithOtp` defaults to `shouldCreateUser: true`, so on a fresh project with signups already
+off you get "Signups not allowed for this instance" and there is no way in at all — nobody can
+sign in because nobody exists, and nobody can be created.
+
 ## Database Setup
 
 Create a **new** Supabase project. Before running `migrations/001_initial_schema.sql`, replace the

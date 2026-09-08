@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
 const ERRORS: Record<string, string> = {
@@ -12,18 +12,39 @@ const ERRORS: Record<string, string> = {
 
 function LoginForm() {
   const params = useSearchParams();
+  const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  // Password is the default because the magic-link round trip — switch to the
+  // inbox, wait, tap, come back — is tedious for the one person who signs in
+  // here several times a week. The link stays as a fallback for a new device.
+  const [mode, setMode] = useState<"password" | "link">("password");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(ERRORS[params.get("error") ?? ""] ?? null);
   const [busy, setBusy] = useState(false);
+
+  const next = params.get("next") ?? "/";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-
-    const next = params.get("next") ?? "/";
     const supabase = createClient();
+
+    if (mode === "password") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setBusy(false);
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      // The middleware re-checks the session and the (host) layout re-checks the
+      // email, so this navigation is a convenience, not the gate.
+      router.replace(next.startsWith("/") && !next.startsWith("//") ? next : "/");
+      router.refresh();
+      return;
+    }
+
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -53,14 +74,45 @@ function LoginForm() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
+            autoComplete="username"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
           />
+
+          {mode === "password" && (
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              autoComplete="current-password"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+            />
+          )}
+
           <button
             type="submit"
             disabled={busy}
             className="w-full rounded-lg bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
           >
-            {busy ? "Sending…" : "Email me a link"}
+            {busy
+              ? mode === "password"
+                ? "Signing in…"
+                : "Sending…"
+              : mode === "password"
+                ? "Sign in"
+                : "Email me a link"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMode((m) => (m === "password" ? "link" : "password"));
+              setError(null);
+            }}
+            className="w-full text-center text-xs text-slate-500 underline"
+          >
+            {mode === "password" ? "Email me a link instead" : "Use a password instead"}
           </button>
         </form>
       )}
