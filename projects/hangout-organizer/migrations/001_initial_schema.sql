@@ -222,11 +222,10 @@ begin
   end loop;
 end $$;
 
--- >>> EDIT THIS LINE before running the migration. <<<
--- Must match HOST_EMAIL in .env.local, lower-case. Until a row exists here,
--- every table is closed to everyone and the dashboard will come up empty.
+-- The host. Must match HOST_EMAIL in .env.local. Until a row exists here every
+-- table is closed to everyone, which shows up as empty pages rather than an error.
 insert into host_allowlist (email)
-values (lower('you@example.com'))
+values (lower('chinwonyoon99@gmail.com'))
 on conflict (email) do nothing;
 
 -- ---------------------------------------------------------------------------
