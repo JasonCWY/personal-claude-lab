@@ -1,17 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createPoll } from "@/lib/actions";
-import {
-  Button,
-  Card,
-  ErrorBanner,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  Textarea,
-} from "@/components/ui";
+import { Button, Card, ErrorBanner, Field, Input, PageHeader, Textarea } from "@/components/ui";
 import { AudiencePicker } from "@/components/AudiencePicker";
-import { ActivityPicker } from "@/components/ActivityPicker";
+import { PollShapeFields } from "@/components/PollShapeFields";
 import { defaultPollRange } from "@/lib/slots";
 import type { Person, RosterGroup, Sport, Venue } from "@/lib/types";
 
@@ -71,28 +62,9 @@ export default async function NewPollPage({
             <Input type="date" name="poll_end_date" required defaultValue={range.end} />
           </Field>
 
-          <Field label="Earliest start">
-            <Input type="time" name="day_start_time" required defaultValue="18:00" step={900} />
-          </Field>
-          <Field
-            label="Latest end"
-            hint="Midnight and past-midnight are fine — 00:00 means the end of that evening."
-          >
-            <Input type="time" name="day_end_time" required defaultValue="22:00" step={900} />
-          </Field>
-
-          <Field label="Slot size" hint="How finely friends can mark availability.">
-            <Select name="slot_minutes" defaultValue="30">
-              <option value="15">15 minutes</option>
-              <option value="30">30 minutes</option>
-              <option value="60">60 minutes</option>
-            </Select>
-          </Field>
-          <div />
+          <PollShapeFields sports={sports} venues={venues} />
 
           <AudiencePicker people={people} groups={groups} memberships={memberships} />
-
-          <ActivityPicker sports={sports} venues={venues} />
 
           <div className="sm:col-span-2">
             <Field label="Notes">

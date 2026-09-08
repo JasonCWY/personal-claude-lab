@@ -8,7 +8,7 @@ import {
   type AvailabilityEntry,
   type QuorumRules,
 } from "@/lib/quorum";
-import { klToInstant } from "@/lib/slots";
+import { DAY_MINUTES, klToInstant } from "@/lib/slots";
 
 // Badminton: 6 people -> 2 hours, 4 people -> 1 hour.
 const BADMINTON: QuorumRules = {
@@ -285,5 +285,64 @@ describe("overlappingPeople", () => {
         { start: at("19:30"), durationMinutes: 60, people: ["y", "z"] },
       ),
     ).toEqual([]);
+  });
+});
+
+describe("date polls reuse the engine unchanged", () => {
+  // "Which 3 consecutive days suit 4 of us for the trip?" is the same question
+  // as "which 2 consecutive hours suit 6 of us", with a day-sized slot.
+  const TRIP = {
+    minPlayersFull: 4,
+    fullDurationMinutes: 3 * DAY_MINUTES,
+    minPlayersShort: 3,
+    shortDurationMinutes: 2 * DAY_MINUTES,
+  };
+
+  const day = (d: string) => klToInstant(d, "00:00");
+
+  function free(dates: string[], people: string[]): AvailabilityEntry[] {
+    return dates.flatMap((d) => people.map((personId) => ({ personId, slotStart: day(d) })));
+  }
+
+  it("finds a run of consecutive days the same people are all free", () => {
+    const availability = [
+      ...free(["2026-09-11", "2026-09-12", "2026-09-13"], ["a", "b", "c", "d"]),
+      ...free(["2026-09-14"], ["a", "b"]),
+    ];
+    const candidates = computeCandidates(availability, TRIP, DAY_MINUTES);
+    const full = candidates.filter((c) => c.tier === "full");
+    expect(full).toHaveLength(1);
+    expect(full[0].start).toEqual(day("2026-09-11"));
+    expect(full[0].headcount).toBe(4);
+    expect(full[0].durationMinutes).toBe(3 * DAY_MINUTES);
+  });
+
+  it("will not stitch a trip across a gap in the dates", () => {
+    // Free Fri and Sat, then Mon and Tue — that is not a 3-day trip.
+    const availability = [
+      ...free(["2026-09-11", "2026-09-12"], ["a", "b", "c", "d"]),
+      ...free(["2026-09-14", "2026-09-15"], ["a", "b", "c", "d"]),
+    ];
+    expect(computeCandidates(availability, TRIP, DAY_MINUTES).filter((c) => c.tier === "full"))
+      .toHaveLength(0);
+  });
+
+  it("applies the same-people rule across days", () => {
+    // Four free Fri+Sat, a DIFFERENT four free Sun. No 3-day trip.
+    const availability = [
+      ...free(["2026-09-11", "2026-09-12"], ["a", "b", "c", "d"]),
+      ...free(["2026-09-13"], ["w", "x", "y", "z"]),
+    ];
+    expect(computeCandidates(availability, TRIP, DAY_MINUTES).filter((c) => c.tier === "full"))
+      .toHaveLength(0);
+  });
+
+  it("falls back to the shorter trip when the full one does not fit", () => {
+    const availability = free(["2026-09-11", "2026-09-12"], ["a", "b", "c"]);
+    const candidates = computeCandidates(availability, TRIP, DAY_MINUTES);
+    expect(candidates.filter((c) => c.tier === "full")).toHaveLength(0);
+    const short = candidates.filter((c) => c.tier === "short");
+    expect(short).toHaveLength(1);
+    expect(short[0].headcount).toBe(3);
   });
 });

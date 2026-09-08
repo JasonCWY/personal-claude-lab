@@ -111,7 +111,7 @@ export default async function Dashboard() {
                     )}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    {sportName.get(s.sport_id)}
+                    {s.sport_id ? sportName.get(s.sport_id) : "Trip"}
                     {pollById.get(s.poll_id) ? ` · ${pollById.get(s.poll_id)!.title}` : ""}
                   </p>
                 </Card>

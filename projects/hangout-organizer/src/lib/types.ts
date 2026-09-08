@@ -43,6 +43,12 @@ export interface RosterGroupMember {
 export type PollStatus = "polling" | "closed";
 
 /**
+ * What a poll is asking. "time" is a grid of times within each day; "date"
+ * asks only which whole days suit — the trip case, one slot per day.
+ */
+export type PollGranularity = "time" | "date";
+
+/**
  * A poll owns the window being asked about and the share link.
  *
  * Availability hangs off this, not off a session, because whether someone is
@@ -55,6 +61,7 @@ export interface Poll {
   title: string;
   share_token: string;
   status: PollStatus;
+  granularity: PollGranularity;
   poll_start_date: string;
   poll_end_date: string;
   day_start_time: string;
@@ -71,7 +78,8 @@ export type SessionStatus = "planning" | "confirmed" | "cancelled" | "completed"
 export interface GameSession {
   id: string;
   poll_id: string;
-  sport_id: string;
+  /** Null on a date poll — a trip is not a court booking. */
+  sport_id: string | null;
   title: string;
   status: SessionStatus;
   min_players_full: number;

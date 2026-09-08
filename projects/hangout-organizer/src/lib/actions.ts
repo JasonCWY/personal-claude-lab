@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { newShareToken } from "@/lib/tokens";
-import { shiftDate } from "@/lib/slots";
+import { DAY_MINUTES, shiftDate } from "@/lib/slots";
 import type { Poll } from "@/lib/types";
 
 function str(form: FormData, key: string): string {
@@ -118,9 +118,28 @@ export async function deleteGroup(form: FormData) {
  * form that silently does nothing. Keep in step with the `polls_*` constraints.
  */
 function validatePollForm(form: FormData): string | null {
-  if (str(form, "poll_end_date") < str(form, "poll_start_date")) {
+  const startDate = str(form, "poll_start_date");
+  const endDate = str(form, "poll_end_date");
+  if (endDate < startDate) {
     return "The 'poll until' date is before the 'poll from' date.";
   }
+
+  if (str(form, "granularity") === "date") {
+    const days = Number(str(form, "date_full_days") || 1);
+    if (!Number.isInteger(days) || days < 1) return "How many days must be a whole number, 1 or more.";
+    // Asking for a 5-day run inside a 3-day window can never succeed, and
+    // failing here is clearer than an empty results page later.
+    const windowDays =
+      Math.round(
+        (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000,
+      ) + 1;
+    if (days > windowDays) {
+      return `You are asking for ${days} consecutive days but only polling ${windowDays}. Widen the dates, or ask for fewer days.`;
+    }
+    if (!str(form, "date_activity_title")) return "Give the trip a name.";
+    return null;
+  }
+
   // An end at or before the start means the next day, so 22:00–00:00 is valid.
   // Only equality is wrong: that would be a 24-hour window.
   if (str(form, "day_end_time") === str(form, "day_start_time")) {
@@ -193,6 +212,7 @@ export async function createPoll(form: FormData) {
       day_start_time: str(form, "day_start_time"),
       day_end_time: str(form, "day_end_time"),
       slot_minutes: Number(str(form, "slot_minutes") || 30),
+      granularity: str(form, "granularity") === "date" ? "date" : "time",
       group_id: groupId,
       notes: optStr(form, "notes"),
     })
@@ -207,6 +227,22 @@ export async function createPoll(form: FormData) {
   await supabase
     .from("poll_invitees")
     .insert(personIds.map((person_id) => ({ poll_id: poll.id, person_id })));
+
+  // A date poll has one activity with no sport — a trip is not a court
+  // booking. Its durations are given in days and stored as minutes, which is
+  // what lets the scheduling engine treat both kinds of poll identically.
+  if (str(form, "granularity") === "date") {
+    await supabase.from("sessions").insert({
+      poll_id: poll.id,
+      sport_id: null,
+      title: str(form, "date_activity_title"),
+      min_players_full: Number(str(form, "date_min_players_full") || 4),
+      full_duration_minutes: Number(str(form, "date_full_days") || 1) * DAY_MINUTES,
+      min_players_short: Number(str(form, "date_min_players_short") || 3),
+      short_duration_minutes: Number(str(form, "date_short_days") || 1) * DAY_MINUTES,
+    });
+    redirect(`/polls/${poll.id}`);
+  }
 
   // One session per activity picked. Thresholds are copied from the sport now,
   // so editing the sport later never rewrites a poll already running.
@@ -279,6 +315,7 @@ export async function duplicatePoll(form: FormData) {
       day_start_time: original.day_start_time,
       day_end_time: original.day_end_time,
       slot_minutes: original.slot_minutes,
+      granularity: original.granularity,
       group_id: original.group_id,
       notes: original.notes,
     })

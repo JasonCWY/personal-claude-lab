@@ -17,6 +17,7 @@ export function HeatmapGrid({
   spec: {
     pollStartDate: string;
     pollEndDate: string;
+    granularity?: "time" | "date";
     dayStartTime: string;
     dayEndTime: string;
     slotMinutes: number;
@@ -69,14 +70,22 @@ export function HeatmapGrid({
           {times.map((time, ti) => (
             <tr key={time}>
               <th className="sticky left-0 whitespace-nowrap bg-white px-2 py-1 text-right font-normal tabular-nums text-slate-500">
-                <span className="text-[0.7rem]">{formatSlotRange(time, spec.slotMinutes)}</span>
+                <span className="text-[0.7rem]">
+                  {spec.granularity === "date"
+                    ? "free"
+                    : formatSlotRange(time, spec.slotMinutes)}
+                </span>
               </th>
               {days.map((day, di) => {
                 const people = slotCounts.get(grid[ti][di].getTime()) ?? [];
                 return (
                   <td
                     key={day}
-                    title={`${formatSlotRange(time, spec.slotMinutes)} — ${
+                    title={`${
+                      spec.granularity === "date"
+                        ? day
+                        : formatSlotRange(time, spec.slotMinutes)
+                    } — ${
                       people.length
                         ? people.map((id) => names.get(id) ?? id).join(", ")
                         : "nobody free"

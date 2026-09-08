@@ -22,7 +22,19 @@ export function ShareMessage({
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const full = `${message}\n${url}`;
+  // The URL goes on its own line, last. WhatsApp turns a bare URL into a
+  // tappable link and builds a preview card from it, but only when nothing is
+  // glued to either end - trailing punctuation or a bracket both break it.
+  const full = `${message}\n\n${url}`;
+
+  // wa.me opens WhatsApp with the text already in the box, so the host picks
+  // a chat and sends rather than copying and pasting. A plain deep link, not
+  // the Business API - nothing to sign up for and nothing to pay.
+  const whatsappHref = `https://wa.me/?text=${encodeURIComponent(full)}`;
+
+  // A URL WhatsApp will not linkify: localhost has no public TLD, so until the
+  // app is deployed the pasted link is dead text on anyone else’s phone.
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(url);
 
   async function copy(text: string, label: string) {
     try {
@@ -79,12 +91,20 @@ export function ShareMessage({
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
+          <a
+            href={whatsappHref}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Open in WhatsApp
+          </a>
           <button
             type="button"
             onClick={() => copy(full, "message")}
             className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
           >
-            Copy WhatsApp message
+            Copy message
           </button>
           {message !== defaultMessage && (
             <button
@@ -98,6 +118,14 @@ export function ShareMessage({
           <span className="text-xs text-slate-500">{full.length} characters</span>
         </div>
       </div>
+
+      {isLocal && (
+        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+          This link points at <code>localhost</code>, so it only works on this machine and WhatsApp
+          will not make it tappable. Deploy to Vercel and set <code>NEXT_PUBLIC_SITE_URL</code>
+          {" "}to the public URL before sending it to anyone.
+        </p>
+      )}
 
       {copied === "failed" ? (
         <p className="text-xs text-rose-700">Could not access the clipboard — copy it manually.</p>

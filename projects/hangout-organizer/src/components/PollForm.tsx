@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AvailabilityGrid } from "@/components/AvailabilityGrid";
+import { DateGrid } from "@/components/DateGrid";
 import type { Person } from "@/lib/types";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
   spec: {
     pollStartDate: string;
     pollEndDate: string;
+    granularity?: "time" | "date";
     dayStartTime: string;
     dayEndTime: string;
     slotMinutes: number;
@@ -85,7 +87,10 @@ export function PollForm({ token, spec, roster, existing, respondedIds }: Props)
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-medium">
-          {me?.display_name}, drag the times you can make
+          {me?.display_name},{" "}
+          {spec.granularity === "date"
+            ? "tap the dates that work for you"
+            : "drag the times you can make"}
         </h2>
         <button
           type="button"
@@ -97,10 +102,16 @@ export function PollForm({ token, spec, roster, existing, respondedIds }: Props)
       </div>
 
       <p className="mb-3 text-sm text-slate-600">
-        Tap or drag to mark yourself free. Drag over green slots again to clear them.
+        {spec.granularity === "date"
+          ? "Tap every date you could do. Tap again to clear one."
+          : "Tap or drag to mark yourself free. Drag over green slots again to clear them."}
       </p>
 
-      <AvailabilityGrid spec={spec} selected={selected} onChange={setSelected} />
+      {spec.granularity === "date" ? (
+        <DateGrid spec={spec} selected={selected} onChange={setSelected} />
+      ) : (
+        <AvailabilityGrid spec={spec} selected={selected} onChange={setSelected} />
+      )}
 
       <div className="mt-4 space-y-3">
         <input
@@ -125,7 +136,9 @@ export function PollForm({ token, spec, roster, existing, respondedIds }: Props)
           >
             Clear all
           </button>
-          <span className="text-sm text-slate-500">{selected.size} slots selected</span>
+          <span className="text-sm text-slate-500">
+            {selected.size} {spec.granularity === "date" ? "dates" : "slots"} selected
+          </span>
         </div>
 
         {status === "saved" && (

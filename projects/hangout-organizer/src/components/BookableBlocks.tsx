@@ -1,6 +1,14 @@
 import { confirmSession } from "@/lib/actions";
 import { Badge, Button, Select } from "@/components/ui";
-import { formatDuration, formatSpan, instantToKl, formatDayHeader } from "@/lib/slots";
+import {
+  DAY_MINUTES,
+  formatDateSpan,
+  formatDayHeader,
+  formatDays,
+  formatDuration,
+  formatSpan,
+  instantToKl,
+} from "@/lib/slots";
 import type { CandidateBlock } from "@/lib/quorum";
 import type { Person, Venue } from "@/lib/types";
 
@@ -22,6 +30,7 @@ export function BookableBlocks({
   defaultVenueId,
   minPlayersFull,
   minPlayersShort,
+  byDate = false,
 }: {
   sessionId: string;
   pollId: string;
@@ -31,14 +40,17 @@ export function BookableBlocks({
   defaultVenueId: string | null;
   minPlayersFull: number;
   minPlayersShort: number;
+  /** Date poll: windows are runs of whole days, so read them in days. */
+  byDate?: boolean;
 }) {
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
 
   if (blocks.length === 0) {
     return (
       <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-        No window yet where the same {minPlayersShort} people are free right through. Chase whoever
-        has not answered, or widen the polled hours.
+        No {byDate ? "run of dates" : "window"} yet where the same {minPlayersShort} people are
+        free right through. Chase whoever has not answered, or widen the{" "}
+        {byDate ? "date range" : "polled hours"}.
       </p>
     );
   }
@@ -79,6 +91,26 @@ export function BookableBlocks({
       left: `${((startMin - dayStartMin) / span) * 100}%`,
       width: `${Math.max(6, ((endMin - startMin) / span) * 100)}%`,
     };
+  }
+
+  if (byDate) {
+    return (
+      <div className="space-y-3">
+        {blocks.map((b, i) => (
+          <BlockRow
+            key={i}
+            block={b}
+            sessionId={sessionId}
+            pollId={pollId}
+            names={names}
+            venues={venues}
+            defaultVenueId={defaultVenueId}
+            minPlayersFull={minPlayersFull}
+            byDate
+          />
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -138,6 +170,7 @@ function BlockRow({
   venues,
   defaultVenueId,
   minPlayersFull,
+  byDate = false,
 }: {
   block: CandidateBlock;
   sessionId: string;
@@ -146,6 +179,7 @@ function BlockRow({
   venues: Venue[];
   defaultVenueId: string | null;
   minPlayersFull: number;
+  byDate?: boolean;
 }) {
   const stretchMinutes = (block.end.getTime() - block.start.getTime()) / 60000;
   const latitude = block.starts.length > 1;
@@ -153,7 +187,11 @@ function BlockRow({
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{formatSpan(block.start, stretchMinutes)}</span>
+        <span className="font-medium">
+          {byDate
+            ? formatDateSpan(block.start, stretchMinutes)
+            : formatSpan(block.start, stretchMinutes)}
+        </span>
         {block.tier === "full" ? (
           <Badge tone="green">{block.headcount} free — full session</Badge>
         ) : (
@@ -164,9 +202,10 @@ function BlockRow({
       </div>
 
       <p className="mt-1 text-xs text-slate-500">
-        Book {formatDuration(block.durationMinutes)}
+        {byDate ? "Take " : "Book "}
+        {byDate ? formatDays(block.durationMinutes) : formatDuration(block.durationMinutes)}
         {latitude
-          ? ` — ${block.starts.length} possible start times inside this stretch`
+          ? ` — ${block.starts.length} possible start ${byDate ? "dates" : "times"} inside this stretch`
           : " — only one start fits"}
       </p>
 

@@ -18,7 +18,7 @@ import {
   overlappingPeople,
   pendingResponders,
 } from "@/lib/quorum";
-import { formatDuration, formatSpan } from "@/lib/slots";
+import { formatDateSpan, formatDays, formatDuration, formatSpan } from "@/lib/slots";
 import { SITE_URL } from "@/lib/env";
 import type {
   AvailabilityRow,
@@ -89,9 +89,12 @@ export default async function PollPage({
   const pending = pendingResponders(roster, responses.map((r) => r.person_id));
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
 
+  const byDate = poll.granularity === "date";
+
   const spec = {
     pollStartDate: poll.poll_start_date,
     pollEndDate: poll.poll_end_date,
+    granularity: poll.granularity,
     dayStartTime: poll.day_start_time,
     dayEndTime: poll.day_end_time,
     slotMinutes: poll.slot_minutes,
@@ -101,11 +104,15 @@ export default async function PollPage({
   const activityNames = sessions.map((s) => s.title).join(" and ");
   const defaultMessage = [
     `${poll.title} — when are you free?`,
-    `${poll.poll_start_date} to ${poll.poll_end_date}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
+    byDate
+      ? `${poll.poll_start_date} to ${poll.poll_end_date}`
+      : `${poll.poll_start_date} to ${poll.poll_end_date}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
     activityNames ? `Planning: ${activityNames}` : "",
     poll.notes ?? "",
     "",
-    "Tap your name and drag the times you can make:",
+    byDate
+      ? "Tap your name, then the dates that work for you:"
+      : "Tap your name and drag the times you can make:",
   ]
     .filter(Boolean)
     .join("\n");
@@ -154,7 +161,9 @@ export default async function PollPage({
     <>
       <PageHeader
         title={poll.title}
-        subtitle={`${poll.poll_start_date} to ${poll.poll_end_date} · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)} · ${roster.length} asked${group ? ` (${group.name})` : ""}`}
+        subtitle={`${poll.poll_start_date} to ${poll.poll_end_date}${
+          byDate ? " · whole dates" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`
+        } · ${roster.length} asked${group ? ` (${group.name})` : ""}`}
         action={<Badge tone={poll.status === "polling" ? "amber" : "slate"}>{poll.status}</Badge>}
       />
 
@@ -234,9 +243,14 @@ export default async function PollPage({
               <div>
                 <h2 className="font-medium">{session.title}</h2>
                 <p className="text-xs text-slate-500">
-                  {sport?.name ?? "Activity"} · {session.min_players_full} →{" "}
-                  {formatDuration(session.full_duration_minutes)}, {session.min_players_short} →{" "}
-                  {formatDuration(session.short_duration_minutes)}
+                  {sport?.name ?? "Trip"} · {session.min_players_full} →{" "}
+                  {byDate
+                    ? formatDays(session.full_duration_minutes)
+                    : formatDuration(session.full_duration_minutes)}
+                  , {session.min_players_short} →{" "}
+                  {byDate
+                    ? formatDays(session.short_duration_minutes)
+                    : formatDuration(session.short_duration_minutes)}
                 </p>
               </div>
               <Badge tone={session.status === "confirmed" ? "green" : "slate"}>
@@ -248,10 +262,15 @@ export default async function PollPage({
               <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4">
                 <p className="font-medium text-emerald-900">
                   Booked:{" "}
-                  {formatSpan(
-                    new Date(session.confirmed_start_at),
-                    session.confirmed_duration_minutes ?? 0,
-                  )}
+                  {byDate
+                    ? formatDateSpan(
+                        new Date(session.confirmed_start_at),
+                        session.confirmed_duration_minutes ?? 0,
+                      )
+                    : formatSpan(
+                        new Date(session.confirmed_start_at),
+                        session.confirmed_duration_minutes ?? 0,
+                      )}
                 </p>
                 <p className="mt-1 text-sm text-emerald-800">
                   {(attendeesBySession.get(session.id) ?? [])
@@ -294,12 +313,14 @@ export default async function PollPage({
                 defaultVenueId={session.venue_id}
                 minPlayersFull={session.min_players_full}
                 minPlayersShort={session.min_players_short}
+                byDate={byDate}
               />
             )}
           </Card>
         );
       })}
 
+      {!byDate && (
       <Card className="mb-6">
         <h2 className="mb-3 font-medium">Add another activity</h2>
         <form action={addSessionToPoll} className="flex flex-wrap items-end gap-2">
@@ -319,6 +340,7 @@ export default async function PollPage({
           It is scored against the answers already collected — nobody fills anything in again.
         </p>
       </Card>
+      )}
 
       <div className="flex flex-wrap gap-4">
         <form action={setPollStatus}>

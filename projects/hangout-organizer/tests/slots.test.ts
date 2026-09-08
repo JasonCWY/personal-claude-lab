@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSlotGrid,
+  DAY_MINUTES,
+  formatDateSpan,
+  formatDays,
   formatDayHeader,
   formatSlotRange,
   formatSpan,
@@ -200,5 +203,64 @@ describe("grid display helpers", () => {
 
   it("flags a span that finishes the next day", () => {
     expect(formatSpan(klToInstant("2026-09-15", "23:00"), 120)).toContain("(next day)");
+  });
+});
+
+describe("date-only polls", () => {
+  const spec = {
+    pollStartDate: "2026-09-11",
+    pollEndDate: "2026-09-15",
+    granularity: "date" as const,
+    dayStartTime: "00:00",
+    dayEndTime: "00:00",
+    slotMinutes: DAY_MINUTES,
+  };
+
+  it("produces exactly one slot per day", () => {
+    const grid = buildSlotGrid(spec);
+    expect(grid.days).toEqual([
+      "2026-09-11",
+      "2026-09-12",
+      "2026-09-13",
+      "2026-09-14",
+      "2026-09-15",
+    ]);
+    expect(grid.times).toEqual(["00:00"]);
+    expect(grid.grid).toHaveLength(1);
+    expect(grid.grid[0]).toHaveLength(5);
+  });
+
+  it("anchors each slot at midnight Kuala Lumpur", () => {
+    const grid = buildSlotGrid(spec);
+    expect(grid.grid[0][0]).toEqual(klToInstant("2026-09-11", "00:00"));
+    expect(instantToKl(grid.grid[0][2]).time).toBe("00:00");
+  });
+
+  it("keeps consecutive days exactly one slot-step apart", () => {
+    // This is what lets the quorum engine find a run of days with no changes:
+    // its contiguity check is slotKeys[i+k] === start + k * step.
+    const row = buildSlotGrid(spec).grid[0].map((d) => d.getTime());
+    for (let i = 1; i < row.length; i++) {
+      expect(row[i] - row[i - 1]).toBe(DAY_MINUTES * 60_000);
+    }
+  });
+
+  it("reads durations in days", () => {
+    expect(formatDays(DAY_MINUTES)).toBe("1 day");
+    expect(formatDays(3 * DAY_MINUTES)).toBe("3 days");
+  });
+
+  it("describes a multi-day span inclusively", () => {
+    // A 3-day trip from Friday runs Fri, Sat, Sun — not "to Monday".
+    expect(formatDateSpan(klToInstant("2026-09-11", "00:00"), 3 * DAY_MINUTES)).toBe(
+      "Fri 11 – Sun 13 Sep",
+    );
+    expect(formatDateSpan(klToInstant("2026-09-11", "00:00"), DAY_MINUTES)).toBe("Fri 11 Sep");
+  });
+
+  it("names both months when a span crosses one", () => {
+    expect(formatDateSpan(klToInstant("2026-09-29", "00:00"), 4 * DAY_MINUTES)).toBe(
+      "Tue 29 Sep – Fri 2 Oct",
+    );
   });
 });

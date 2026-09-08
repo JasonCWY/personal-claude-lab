@@ -58,9 +58,20 @@ export function formatDuration(minutes: number): string {
   return `${Math.floor(minutes / 60)}hr ${minutes % 60}min`;
 }
 
+export type Granularity = "time" | "date";
+
+export const DAY_MINUTES = 24 * 60;
+
 export interface SlotGridSpec {
   pollStartDate: string; // YYYY-MM-DD
   pollEndDate: string; // YYYY-MM-DD
+  /**
+   * "time" polls a grid of times within each day. "date" asks only which whole
+   * days suit — the trip case — and produces one slot per day, at midnight KL.
+   * The quorum engine is unchanged either way: a run of consecutive day-slots
+   * is the same question as a run of consecutive half-hours.
+   */
+  granularity?: Granularity;
   dayStartTime: string; // HH:MM
   /**
    * HH:MM. If this is at or before dayStartTime it means the NEXT day, so a
@@ -93,6 +104,17 @@ export function buildSlotGrid(spec: SlotGridSpec): SlotGrid {
   const end = klToInstant(spec.pollEndDate, "00:00");
   for (let t = start.getTime(); t <= end.getTime(); t += DAY_MS) {
     days.push(instantToKl(new Date(t)).date);
+  }
+
+  // A date poll has exactly one slot per day, anchored at midnight KL. Days are
+  // a fixed 24h apart here (Malaysia has no DST), so consecutive days are
+  // contiguous by the same arithmetic the engine already uses for half-hours.
+  if (spec.granularity === "date") {
+    return {
+      days,
+      times: ["00:00"],
+      grid: [days.map((day) => klToInstant(day, "00:00"))],
+    };
   }
 
   const [sh, sm] = spec.dayStartTime.split(":").map(Number);
@@ -198,4 +220,28 @@ export function formatSpan(start: Date, minutes: number): string {
   return sameDay
     ? `${weekday} ${dayOfMonth} ${month}, ${a.time} – ${b.time}`
     : `${weekday} ${dayOfMonth} ${month}, ${a.time} – ${b.time} (next day)`;
+}
+
+/** "3 days" / "1 day" — durations on a date poll read in days, not hours. */
+export function formatDays(minutes: number): string {
+  const days = Math.round(minutes / DAY_MINUTES);
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/**
+ * A booking span on a date poll: "Fri 11 – Sun 13 Sep", or a single date.
+ *
+ * Deliberately inclusive of the last day. A 3-day trip starting Friday runs
+ * Friday, Saturday, Sunday — saying "to Monday" would be arithmetic leaking
+ * into something people read as a plan.
+ */
+export function formatDateSpan(start: Date, minutes: number): string {
+  const days = Math.max(1, Math.round(minutes / DAY_MINUTES));
+  const a = formatDayHeader(instantToKl(start).date);
+  if (days === 1) return `${a.weekday} ${a.dayOfMonth} ${a.month}`;
+  const lastInstant = new Date(start.getTime() + (days - 1) * 24 * 60 * MINUTE_MS);
+  const b = formatDayHeader(instantToKl(lastInstant).date);
+  return a.month === b.month
+    ? `${a.weekday} ${a.dayOfMonth} – ${b.weekday} ${b.dayOfMonth} ${b.month}`
+    : `${a.weekday} ${a.dayOfMonth} ${a.month} – ${b.weekday} ${b.dayOfMonth} ${b.month}`;
 }
