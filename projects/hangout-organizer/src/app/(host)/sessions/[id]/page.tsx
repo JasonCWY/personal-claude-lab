@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { deleteSession, duplicateSession, setSessionStatus } from "@/lib/actions";
-import { Badge, Button, Card, Empty, PageHeader } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorBanner, PageHeader } from "@/components/ui";
 import { CopyLink } from "@/components/CopyLink";
 import { HeatmapGrid } from "@/components/HeatmapGrid";
 import { QuorumSlots } from "@/components/QuorumSlots";
@@ -26,8 +26,15 @@ const STATUS_TONE = {
   completed: "slate",
 } as const;
 
-export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SessionPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
+}) {
   const { id } = await params;
+  const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
   const { data: sessionData } = await supabase
@@ -93,6 +100,8 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         subtitle={`${sportData?.name ?? "Session"} · polling ${session.poll_start_date} to ${session.poll_end_date}`}
         action={<Badge tone={STATUS_TONE[session.status]}>{session.status}</Badge>}
       />
+
+      <ErrorBanner message={actionError} />
 
       {session.status === "confirmed" && session.confirmed_start_at && (
         <Card className="mb-6 border-emerald-300 bg-emerald-50">

@@ -1,12 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import { createSession } from "@/lib/actions";
-import { Button, Card, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
+import { Button, Card, ErrorBanner, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { defaultPollRange } from "@/lib/slots";
 import type { Sport, Venue } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewSessionPage() {
+export default async function NewSessionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const supabase = await createClient();
   const [{ data: sportData }, { data: venueData }] = await Promise.all([
     supabase.from("sports").select("*").order("name"),
@@ -24,6 +29,8 @@ export default async function NewSessionPage() {
         title="New session"
         subtitle="Set the window to poll. Thresholds are prefilled from the sport and can be changed for this session only."
       />
+
+      <ErrorBanner message={error} />
 
       <Card>
         <form action={createSession} className="grid gap-4 sm:grid-cols-2">

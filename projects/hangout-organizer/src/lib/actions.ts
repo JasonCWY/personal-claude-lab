@@ -79,7 +79,40 @@ export async function deleteVenue(form: FormData) {
 
 // -------------------------------------------------------------- sessions ----
 
+/**
+ * Validate what the DB's CHECK constraints enforce, so the host gets a sentence
+ * instead of a form that silently does nothing. Returns null when the input is
+ * fine. Keep these in step with the `sessions_*` constraints in the migration.
+ */
+function validateSessionForm(form: FormData): string | null {
+  const startDate = str(form, "poll_start_date");
+  const endDate = str(form, "poll_end_date");
+  if (endDate < startDate) {
+    return "The 'poll until' date is before the 'poll from' date.";
+  }
+
+  const startTime = str(form, "day_start_time");
+  const endTime = str(form, "day_end_time");
+  if (endTime <= startTime) {
+    return endTime === "00:00"
+      ? "A session ending at midnight isn't supported — the latest end must be after the earliest start on the same day. Try 23:30."
+      : "The latest end must be after the earliest start.";
+  }
+
+  const slot = Number(str(form, "slot_minutes") || 30);
+  if (slot !== 30 && slot !== 60) {
+    return "Slot size must be 30 or 60 minutes.";
+  }
+
+  return null;
+}
+
 export async function createSession(form: FormData) {
+  const problem = validateSessionForm(form);
+  if (problem) {
+    redirect(`/sessions/new?error=${encodeURIComponent(problem)}`);
+  }
+
   const supabase = await createClient();
   const sportId = str(form, "sport_id");
 
@@ -88,7 +121,9 @@ export async function createSession(form: FormData) {
     .select("*")
     .eq("id", sportId)
     .single();
-  if (!sport) return;
+  if (!sport) {
+    redirect(`/sessions/new?error=${encodeURIComponent("That sport no longer exists.")}`);
+  }
 
   // Sport thresholds are DEFAULTS. They are copied onto the session so that
   // editing the sport later never rewrites the rules of a poll already running.
@@ -117,7 +152,12 @@ export async function createSession(form: FormData) {
     .select("id")
     .single();
 
-  if (error || !data) return;
+  if (error || !data) {
+    // Anything the validation above did not anticipate. Show it rather than
+    // returning silently, which renders as a button that does nothing.
+    const message = error?.message ?? "Could not create the session.";
+    redirect(`/sessions/new?error=${encodeURIComponent(message)}`);
+  }
   redirect(`/sessions/${data.id}`);
 }
 
@@ -201,6 +241,9 @@ export async function duplicateSession(form: FormData) {
     .select("id")
     .single();
 
-  if (error || !data) return;
+  if (error || !data) {
+    const message = error?.message ?? "Could not duplicate the session.";
+    redirect(`/sessions/${original.id}?error=${encodeURIComponent(message)}`);
+  }
   redirect(`/sessions/${data.id}`);
 }

@@ -125,3 +125,20 @@ export function Empty({ children }: { children: React.ReactNode }) {
     </p>
   );
 }
+
+/**
+ * Surfaces a message a server action passed back via ?error=. Server actions
+ * cannot return a value to a plain <form action={...}>, so they redirect with
+ * the reason attached and the page renders it here.
+ */
+export function ErrorBanner({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <div
+      role="alert"
+      className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+    >
+      {message}
+    </div>
+  );
+}
