@@ -70,3 +70,57 @@ GOTCHAS WORTH KEEPING:
 
 Backups from this session: .backups/ (gitignored) — pre-migration and pre-clear snapshots.
 Node is at C:\Program Files\nodejs (on PATH in PowerShell, not in the Bash tool).
+
+================================================================================
+FUTURE ENHANCEMENTS (captured 2026-09-09, not started)
+================================================================================
+
+1. PERFORMANCE — "the response is not smooth"
+
+   MEASURE BEFORE CHANGING ANYTHING. The likely causes are in this order, and
+   only the first two are worth guessing at:
+
+   a) REGION MISMATCH. Check the Supabase project's region against the Vercel
+      function region. If Supabase is in Singapore and the function runs in
+      Washington, every single query pays ~200ms each way, and the poll page
+      makes a lot of them. This is by far the most likely dominant factor and
+      the cheapest to fix — set the Vercel function region to match Supabase.
+   b) SERIAL ROUND TRIPS on the poll page. It is 13 Supabase calls, and four
+      are awaited OUTSIDE the Promise.all (page.tsx lines 48, 74, 94, 145):
+      poll -> invitees -> people -> opt-outs -> attendees, each waiting on the
+      one before. The invitee/people pair could be one join; opt-outs and
+      attendees could join the Promise.all once the session ids are known.
+      Look at collapsing these into a Postgres view or an RPC.
+   c) NO CACHING AT ALL. 11 pages are pinned `export const dynamic =
+      "force-dynamic"`. That was right while the model was changing under us,
+      but /venues, /people and /templates barely change and could revalidate
+      on a tag instead.
+   d) Vercel free-tier cold starts, and Supabase free-tier auto-pause after
+      ~a week idle. Neither is fixable on a free plan; just know they exist
+      before blaming the code.
+
+   NOTE: the sluggishness seen during development was mostly `next dev`
+   compiling routes on demand. That does NOT apply to the deployed build, so
+   measure on production, not localhost.
+
+2. MOBILE UI/UX
+
+   The FRIEND-facing side is already touch-first (drag grid with touch-action
+   none and elementFromPoint tracking, big tap targets on the date grid). The
+   HOST side is the weak part and was built desktop-first:
+     - the poll page is very long and scrolls a lot on a phone
+     - the heatmap is a wide table that overflows horizontally
+     - BookableBlocks' timeline bars are narrow on a small screen
+     - the new-poll form is a 2-column grid that gets cramped
+   Start with the poll page, since that is the one used while standing in a
+   court car park deciding what to book.
+
+3. ROSTER SECTION
+
+   Currently just a flat list of names with active/inactive. Wanted:
+     - total count, and active vs inactive split
+     - which groups each person belongs to, shown on their row
+     - probably: filter by group, and a count per group (the group cards
+       already show a count, the people rows do not show membership)
+   All of this is available from roster_group_members, which /people already
+   loads - it is presentation, not new queries.
