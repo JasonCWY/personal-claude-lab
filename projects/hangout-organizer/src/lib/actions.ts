@@ -145,9 +145,9 @@ function validatePollForm(form: FormData): string | null {
   if (str(form, "day_end_time") === str(form, "day_start_time")) {
     return "The earliest start and latest end are the same time.";
   }
-  const slot = Number(str(form, "slot_minutes") || 30);
-  if (![15, 30, 60].includes(slot)) {
-    return "Slot size must be 15, 30 or 60 minutes.";
+  const slot = Number(str(form, "slot_minutes") || 60);
+  if (![30, 60].includes(slot)) {
+    return "Slot size must be 30 or 60 minutes.";
   }
   if (!form.getAll("session_sport_ids").map(String).filter(Boolean).length) {
     return "Add at least one activity — a poll with nothing to book has nothing to work out.";
@@ -211,7 +211,7 @@ export async function createPoll(form: FormData) {
       poll_end_date: str(form, "poll_end_date"),
       day_start_time: str(form, "day_start_time"),
       day_end_time: str(form, "day_end_time"),
-      slot_minutes: Number(str(form, "slot_minutes") || 30),
+      slot_minutes: Number(str(form, "slot_minutes") || 60),
       granularity: str(form, "granularity") === "date" ? "date" : "time",
       group_id: groupId,
       notes: optStr(form, "notes"),

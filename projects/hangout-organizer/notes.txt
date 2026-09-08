@@ -47,7 +47,7 @@ WHAT THE APP DOES NOW (all built this session, on top of the original build):
   line so WhatsApp linkifies it, and a warning while SITE_URL is still localhost.
 
   Overnight windows (22:00–00:00, 21:00–01:00). Grid headers carry the month; row labels are slot
-  ranges. 15-minute slots.
+  ranges. Slots default to 60 minutes, or 30.
 
 STATE: 51/51 tests, tsc clean, 17 routes build. 0 polls, 11 people, 1 group ("Everyone", 6
 members), 2 sports, 0 VENUES (add one so a confirmed session has a booking link).

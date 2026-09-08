@@ -82,13 +82,15 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
             <label className="mb-1 block text-sm font-medium text-slate-700">Slot size</label>
             <select
               name="slot_minutes"
-              defaultValue="30"
+              defaultValue="60"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
             >
-              <option value="15">15 minutes</option>
-              <option value="30">30 minutes</option>
               <option value="60">60 minutes</option>
+              <option value="30">30 minutes</option>
             </select>
+            <p className="mt-1 text-xs text-slate-500">
+              Coarser slots mean less to tap on a phone, and courts book by the hour anyway.
+            </p>
           </div>
           <div />
 

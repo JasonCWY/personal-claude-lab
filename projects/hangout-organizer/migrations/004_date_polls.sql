@@ -21,7 +21,7 @@ alter table polls add constraint polls_granularity_check
 -- A whole-day slot is 1440 minutes.
 alter table polls drop constraint if exists polls_slot_minutes;
 alter table polls add constraint polls_slot_minutes
-  check (slot_minutes in (15, 30, 60, 1440));
+  check (slot_minutes in (30, 60, 1440));
 
 -- A date poll ignores the time-of-day bounds, so they must be allowed to match.
 alter table polls drop constraint if exists polls_day_range;

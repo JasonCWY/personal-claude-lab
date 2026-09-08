@@ -61,7 +61,8 @@ create table if not exists polls (
 
   constraint polls_poll_range   check (poll_end_date >= poll_start_date),
   constraint polls_day_range    check (day_end_time <> day_start_time),
-  constraint polls_slot_minutes check (slot_minutes in (15, 30, 60))
+  -- 1440 is a whole day, for date-only polls (migration 004).
+  constraint polls_slot_minutes check (slot_minutes in (30, 60))
 );
 
 -- The resolved invitee list, frozen at creation. A poll shows exactly these
