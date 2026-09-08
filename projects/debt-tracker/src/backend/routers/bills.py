@@ -1,57 +1,66 @@
 from __future__ import annotations
 
+import sqlite3
 import traceback
 from decimal import Decimal
 from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from supabase import Client
 
-from ..database import get_db
-from ..models.bill import BillOut, BillUpdate, ItemOut, ItemCreate, ParsedReceipt
+from ..database import execute, get_db, money, new_id, query_all, query_one, to_money
+from ..models.bill import BillOut, BillUpdate, ItemOut, ParsedReceipt
 from ..services import receipt_parser, storage
 
 router = APIRouter()
 
 
-def _fetch_bill(db: Client, bill_id: str) -> dict:
-    row = db.table("bills").select("*").eq("id", bill_id).single().execute()
-    if not row.data:
+def _fetch_bill(db: sqlite3.Connection, bill_id: str) -> dict:
+    row = query_one(db, "SELECT * FROM bills WHERE id = ?", (bill_id,))
+    if not row:
         raise HTTPException(404, "Bill not found")
-    return row.data
+    return row
 
 
-def _fetch_items(db: Client, bill_id: str) -> List[dict]:
-    return db.table("items").select("*").eq("bill_id", bill_id).order("sort_order").execute().data
+def _fetch_items(db: sqlite3.Connection, bill_id: str) -> List[dict]:
+    return query_all(
+        db, "SELECT * FROM items WHERE bill_id = ? ORDER BY sort_order", (bill_id,)
+    )
+
+
+def _item_out(r: dict) -> ItemOut:
+    return ItemOut(
+        id=r["id"],
+        name=r["name"],
+        unit_price=to_money(r["unit_price"]),
+        quantity=r["quantity"],
+        total_price=to_money(r["total_price"]),
+        sort_order=r["sort_order"],
+    )
 
 
 @router.post("/bills", response_model=BillOut)
 async def create_bill(
     title: str = Form(...),
-    currency: str = Form("SGD"),
+    currency: str = Form("MYR"),
     file: UploadFile = File(...),
-    db: Client = Depends(get_db),
+    db: sqlite3.Connection = Depends(get_db),
 ):
-    # Create draft bill (requires auth; for MVP we skip auth and use service role)
-    # TODO: wire auth.uid() when Supabase Auth is set up
-    bill_row = db.table("bills").insert({
-        "title": title,
-        "currency": currency,
-        "created_by": "00000000-0000-0000-0000-000000000000",  # placeholder
-    }).execute().data[0]
-    bill_id = bill_row["id"]
+    bill_id = new_id()
+    execute(
+        db,
+        "INSERT INTO bills (id, title, currency) VALUES (?, ?, ?)",
+        (bill_id, title, currency),
+    )
 
-    # Upload image to Supabase Storage
     file_bytes = await file.read()
-    image_path = storage.upload_receipt(db, bill_id, file_bytes, file.content_type or "image/jpeg")
+    image_path = storage.upload_receipt(bill_id, file_bytes, file.content_type or "image/jpeg")
 
-    # Parse receipt with Claude
     try:
-        image_b64, media_type = storage.read_receipt_as_base64(db, image_path)
+        image_b64, media_type = storage.read_receipt_as_base64(image_path)
         parsed: ParsedReceipt = receipt_parser.parse_receipt(image_b64, media_type)
     except Exception as exc:
         print(f"[receipt parsing error] {exc}")
         traceback.print_exc()
-        db.table("bills").update({"receipt_image_url": image_path}).eq("id", bill_id).execute()
+        execute(db, "UPDATE bills SET receipt_image_url = ? WHERE id = ?", (image_path, bill_id))
         return BillOut(
             id=bill_id,
             title=title,
@@ -66,46 +75,48 @@ async def create_bill(
             items=[],
         )
 
-    # Insert items
     subtotal = parsed.subtotal or sum(
         (i.unit_price or Decimal("0")) * i.quantity for i in parsed.items
     )
-    items_payload = [
-        {
-            "bill_id": bill_id,
-            "name": i.name,
-            "unit_price": float(i.unit_price) if i.unit_price else 0,
-            "quantity": i.quantity,
-            "sort_order": idx,
-        }
-        for idx, i in enumerate(parsed.items)
-    ]
-    inserted_items = db.table("items").insert(items_payload).execute().data if items_payload else []
+    item_ids = [new_id() for _ in parsed.items]
+    if parsed.items:
+        db.executemany(
+            "INSERT INTO items (id, bill_id, name, unit_price, quantity, sort_order)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    item_ids[idx],
+                    bill_id,
+                    i.name,
+                    money(i.unit_price or 0),
+                    i.quantity,
+                    idx,
+                )
+                for idx, i in enumerate(parsed.items)
+            ],
+        )
+        db.commit()
 
     tax = parsed.tax or Decimal("0")
     service_charge = parsed.service_charge or Decimal("0")
     total = parsed.total or (subtotal + tax + service_charge)
 
-    db.table("bills").update({
-        "receipt_image_url": image_path,
-        "subtotal": float(subtotal),
-        "tax": float(tax),
-        "service_charge": float(service_charge),
-        "total": float(total),
-        "currency": parsed.currency or currency,
-    }).eq("id", bill_id).execute()
+    execute(
+        db,
+        "UPDATE bills SET receipt_image_url = ?, subtotal = ?, tax = ?,"
+        " service_charge = ?, total = ?, currency = ? WHERE id = ?",
+        (
+            image_path,
+            money(subtotal),
+            money(tax),
+            money(service_charge),
+            money(total),
+            parsed.currency or currency,
+            bill_id,
+        ),
+    )
 
-    items_out = [
-        ItemOut(
-            id=r["id"],
-            name=r["name"],
-            unit_price=Decimal(str(r["unit_price"])),
-            quantity=r["quantity"],
-            total_price=Decimal(str(r["total_price"])),
-            sort_order=r["sort_order"],
-        )
-        for r in inserted_items
-    ]
+    items_out = [_item_out(r) for r in _fetch_items(db, bill_id)]
 
     return BillOut(
         id=bill_id,
@@ -123,28 +134,17 @@ async def create_bill(
 
 
 @router.get("/bills/{bill_id}", response_model=BillOut)
-def get_bill(bill_id: str, db: Client = Depends(get_db)):
+def get_bill(bill_id: str, db: sqlite3.Connection = Depends(get_db)):
     bill = _fetch_bill(db, bill_id)
-    raw_items = _fetch_items(db, bill_id)
-    items_out = [
-        ItemOut(
-            id=r["id"],
-            name=r["name"],
-            unit_price=Decimal(str(r["unit_price"])),
-            quantity=r["quantity"],
-            total_price=Decimal(str(r["total_price"])),
-            sort_order=r["sort_order"],
-        )
-        for r in raw_items
-    ]
+    items_out = [_item_out(r) for r in _fetch_items(db, bill_id)]
     return BillOut(
         id=bill["id"],
         title=bill["title"],
         currency=bill["currency"],
-        subtotal=Decimal(str(bill["subtotal"])) if bill["subtotal"] else None,
-        tax=Decimal(str(bill["tax"] or 0)),
-        service_charge=Decimal(str(bill["service_charge"] or 0)),
-        total=Decimal(str(bill["total"])) if bill["total"] else None,
+        subtotal=to_money(bill["subtotal"]) if bill["subtotal"] is not None else None,
+        tax=to_money(bill["tax"]),
+        service_charge=to_money(bill["service_charge"]),
+        total=to_money(bill["total"]) if bill["total"] is not None else None,
         actual_payer_id=bill["actual_payer_id"],
         receipt_image_url=bill["receipt_image_url"],
         status=bill["status"],
@@ -153,49 +153,53 @@ def get_bill(bill_id: str, db: Client = Depends(get_db)):
 
 
 @router.patch("/bills/{bill_id}", response_model=BillOut)
-def update_bill(bill_id: str, body: BillUpdate, db: Client = Depends(get_db)):
+def update_bill(bill_id: str, body: BillUpdate, db: sqlite3.Connection = Depends(get_db)):
     _fetch_bill(db, bill_id)
     updates: dict = {}
     if body.title is not None:
         updates["title"] = body.title
     if body.tax is not None:
-        updates["tax"] = float(body.tax)
+        updates["tax"] = money(body.tax)
     if body.service_charge is not None:
-        updates["service_charge"] = float(body.service_charge)
+        updates["service_charge"] = money(body.service_charge)
     if body.actual_payer_id is not None:
         updates["actual_payer_id"] = body.actual_payer_id
 
     if body.items is not None:
-        db.table("items").delete().eq("bill_id", bill_id).execute()
+        execute(db, "DELETE FROM items WHERE bill_id = ?", (bill_id,))
         if body.items:
-            payload = [
-                {
-                    "bill_id": bill_id,
-                    "name": i.name,
-                    "unit_price": float(i.unit_price),
-                    "quantity": i.quantity,
-                    "sort_order": idx,
-                }
-                for idx, i in enumerate(body.items)
-            ]
-            db.table("items").insert(payload).execute()
+            db.executemany(
+                "INSERT INTO items (id, bill_id, name, unit_price, quantity, sort_order)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (new_id(), bill_id, i.name, money(i.unit_price), i.quantity, idx)
+                    for idx, i in enumerate(body.items)
+                ],
+            )
+            db.commit()
         raw_items = _fetch_items(db, bill_id)
-        new_subtotal = sum(Decimal(str(r["total_price"])) for r in raw_items)
-        updates["subtotal"] = float(new_subtotal)
+        updates["subtotal"] = money(sum(to_money(r["total_price"]) for r in raw_items))
 
     if updates:
-        db.table("bills").update(updates).eq("id", bill_id).execute()
+        assignments = ", ".join(f"{col} = ?" for col in updates)
+        execute(
+            db,
+            f"UPDATE bills SET {assignments} WHERE id = ?",
+            (*updates.values(), bill_id),
+        )
 
     return get_bill(bill_id, db)
 
 
 @router.post("/bills/{bill_id}/share")
-def share_bill(bill_id: str, db: Client = Depends(get_db)):
+def share_bill(bill_id: str, db: sqlite3.Connection = Depends(get_db)):
     """Open the bill so participants can access their invite links."""
     _fetch_bill(db, bill_id)
-    db.table("bills").update({"status": "open"}).eq("id", bill_id).execute()
-    participants = (
-        db.table("participants").select("id,display_name,invite_token").eq("bill_id", bill_id).execute().data
+    execute(db, "UPDATE bills SET status = 'open' WHERE id = ?", (bill_id,))
+    participants = query_all(
+        db,
+        "SELECT id, display_name, invite_token FROM participants WHERE bill_id = ?",
+        (bill_id,),
     )
     base_url = "http://localhost:5173"
     links = [

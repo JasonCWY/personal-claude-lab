@@ -1,0 +1,12 @@
+# Local database, receipt images and the one-shot Supabase export.
+# This app is single-user and its data never leaves the machine.
+data/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+node_modules/
+dist/

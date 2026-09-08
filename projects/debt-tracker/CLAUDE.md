@@ -35,7 +35,7 @@ python -m pytest tests/ -v
 src/backend/
   main.py               # FastAPI app
   config.py             # pydantic-settings reads root .env
-  database.py           # Supabase service_role client singleton
+  database.py           # SQLite connection + query helpers
   models/               # Pydantic request/response models
   routers/
     bills.py            # POST/GET/PATCH /api/bills, POST /api/bills/{id}/share
@@ -43,9 +43,9 @@ src/backend/
     selections.py       # GET/POST /api/bills/{id}/join/{token}[/selections]
     payments.py         # POST /api/bills/{id}/payments, GET /api/bills/{id}/summary
   services/
-    calculator.py       # Pure Python calculation engine — no FastAPI/Supabase imports
+    calculator.py       # Pure Python calculation engine — no FastAPI/DB imports
     receipt_parser.py   # Gemini Vision structured parsing (free tier, gemini-2.0-flash)
-    storage.py          # Supabase Storage upload/download
+    storage.py          # Receipt images on the local filesystem
 
 src/frontend/src/
   App.jsx               # React Router: / | /bill/:id | /bill/:id/join/:token
@@ -60,19 +60,50 @@ src/frontend/src/
 
 - `services/calculator.py` is a pure function: takes dataclasses in, returns `CalculationResult`. Zero external imports. Always test here first when changing splitting logic.
 - Receipt parser uses `response_mime_type="application/json"` on Gemini to force structured output, then validates with Pydantic. Never trust unvalidated free-text responses.
-- All Supabase writes go through the FastAPI backend (service_role key). The frontend never writes to Supabase directly.
-- The `actual_payer_id` FK on `bills` is added via `ALTER TABLE` after `participants` is created (circular reference workaround).
+- All database access goes through the FastAPI backend. The frontend only ever calls `/api/*`.
+- **Money is REAL in SQLite, rounded to 2dp on write (`database.money`) and quantized to 2dp on
+  read (`database.to_money`).** Both halves are needed: `NUMERIC(10,2)` used to guarantee this, and
+  without `to_money` the API answers `"37.0"` where it used to answer `"37.00"`, and float
+  artefacts leak into totals. Never build a money `Decimal` straight from a SQLite value.
+- **Ids are minted in Python (`database.new_id`)**, including `participants.invite_token`. SQLite
+  has no `gen_random_uuid()`.
+- A selection submission **replaces** that participant's assignments rather than merging. Note the
+  consequence, which predates the SQLite move: if A shares an item with B and B later submits
+  without it, B's share is dropped and the remainder falls into `unassigned_amount`.
+
+## Why SQLite
+
+This app used to run on the Supabase project shared with `reader-assistant`. It moved to a local
+SQLite file on 2026-09-08 because the free tier allows two projects and `hangout-organizer` — the
+only genuinely deployed app in this repo — needed one of them.
+
+The move was the right shape regardless: debt-tracker is local, single-user, never deployed, and
+ran with the `service_role` key against RLS-off tables. It was paying for a hosted Postgres with a
+network dependency, a project slot and a database that free-tier auto-pause puts to sleep between
+uses. A file has none of those problems, and receipt storage got *simpler* — a folder instead of a
+bucket.
+
+Do not reintroduce a Supabase dependency here. If this app is ever deployed, that is the moment to
+revisit it, and RLS becomes mandatory at the same time — see the root CLAUDE.md.
 
 ## Environment
 
-Copy `../../.env.example` to `../../.env` (root) and add:
+Copy `../../.env.example` to `../../.env` (root). debt-tracker reads exactly one key:
+
 ```
-ANTHROPIC_API_KEY=...
-SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_SERVICE_KEY=...
-SUPABASE_ANON_KEY=...
+GEMINI_API_KEY=...
 ```
 
 ## Database Setup
 
-Run `migrations/001_initial_schema.sql` in the Supabase SQL editor. Create a private Storage bucket named `receipts`.
+None. `database.get_db()` creates `data/debt-tracker.db` from `migrations/001_initial_schema.sql`
+on first use; the statements are all `IF NOT EXISTS`, so it is safe on every boot. Receipt images
+go to `data/receipts/<bill_id>/original.jpg`. The whole `data/` directory is gitignored — it is
+your real data and it never leaves the machine.
+
+### The one-shot Supabase export
+
+`scripts/export_from_supabase.py` and `scripts/import_to_sqlite.py` moved the existing rows and
+receipt images across. They are kept for reference and for re-running before the Supabase project
+is deleted; neither is part of normal operation. The export reads the root `.env` directly, since
+`config.py` no longer carries Supabase settings.

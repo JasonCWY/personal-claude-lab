@@ -9,7 +9,6 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111",
   "uvicorn[standard]>=0.30",
-  "supabase>=2.4",
   "google-genai>=0.5",
   "pydantic-settings>=2.2",
   "python-multipart>=0.0.9",
