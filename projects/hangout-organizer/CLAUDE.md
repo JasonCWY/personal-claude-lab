@@ -67,7 +67,7 @@ many sessions: friends answer once, every session is scored against those answer
 polls                 window + share_token + status; the thing friends answer
   poll_invitees       who was asked, FROZEN at creation
   availability        poll_id + person_id + slot_start
-  poll_responses      who submitted, when, and any comment
+  poll_responses      who submitted, when, any comment, and `declined`
   sessions            an activity to book within the poll; own thresholds,
                       own venue, own confirmed_start_at
     attendees         who was free for the window that got confirmed
@@ -123,6 +123,14 @@ src/
   database: these endpoints are open to anyone with the link.
 - **The friend-facing grid replaces, it does not merge.** A submission is that person's complete
   answer, so cleared slots must actually disappear.
+- **There are three distinct answers, and they must not be collapsed.** No `poll_responses` row
+  means *not answered yet* — chase them. `declined` means *not free for any of this window* — a
+  real answer, so they leave the "waiting on" list and nobody chases them. A `session_optouts` row
+  means *free then, just not for that activity* (migration 005). Submitting an empty grid has
+  always recorded the same state as a decline, but nobody guesses that, so it needs the explicit
+  button: without one people either leave the link unanswered or invent a slot they cannot make,
+  and both are worse for the host than a plain no. A decline carries no availability, and the
+  route enforces that by ignoring any slots sent alongside it.
 - **Times are `timestamptz` UTC in the DB, rendered in Asia/Kuala_Lumpur at the edges.**
   `slots.ts` uses fixed +8 arithmetic because Malaysia has no DST — do not copy that to a timezone
   that does.
@@ -174,6 +182,22 @@ table with the old `using (true)` policy would be open to any signed-up stranger
 Vercel → New Project → this repo → **Root Directory: `projects/hangout-organizer`**. Set the five
 env vars in the dashboard. In Supabase Auth settings add the Vercel URL to the redirect allowlist,
 and set `NEXT_PUBLIC_SITE_URL` to it so share links point at production.
+
+### Functions run in Tokyo, next to the database
+
+`vercel.json` pins `regions: ["hnd1"]`. The Supabase project is in AWS `ap-northeast-1` (Tokyo),
+and Vercel's Hobby default is `iad1` (Washington DC) — which put roughly 160ms of trans-Pacific
+latency on **every** Supabase query, several of them per page render. Pinning the function to the
+database's region turns each of those into a same-region hop.
+
+Tokyo rather than Singapore, even though the friends are in Malaysia: a page render makes several
+serial queries to Postgres and the browser makes exactly one request to the function, so the link
+worth shortening is function→database, not browser→function. Moving the Supabase project itself
+to `ap-southeast-1` would be better still and would let this be `sin1`, but that means recreating
+the project — the free tier cannot migrate regions.
+
+Middleware is the exception: it runs on the Edge Runtime at whatever PoP is nearest the visitor
+and cannot be pinned. That is why it must not do network I/O — see `middleware.ts`.
 
 ## Not in v1
 

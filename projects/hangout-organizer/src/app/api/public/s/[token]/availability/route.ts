@@ -31,6 +31,8 @@ export async function POST(
     comment?: string | null;
     /** Activities in this poll the person is NOT up for. Absence means in. */
     optOutSessionIds?: string[];
+    /** "None of these work for me." Answers the poll with no availability. */
+    declined?: boolean;
   };
   try {
     body = await request.json();
@@ -39,7 +41,11 @@ export async function POST(
   }
 
   const personId = body.personId;
-  const slots = Array.isArray(body.slots) ? body.slots : [];
+  const declined = body.declined === true;
+  // A decline is an answer of "no times", so any slots in the body are ignored
+  // rather than rejected — the two cannot both be true, and the client having
+  // sent stale grid state is not worth failing a submission over.
+  const slots = declined ? [] : Array.isArray(body.slots) ? body.slots : [];
   if (!personId) {
     return NextResponse.json({ error: "personId is required" }, { status: 400 });
   }
@@ -64,22 +70,23 @@ export async function POST(
     return NextResponse.json({ error: "This poll is closed" }, { status: 409 });
   }
 
-  const { data: invited } = await supabase
-    .from("poll_invitees")
-    .select("person_id")
-    .eq("poll_id", poll.id)
-    .eq("person_id", personId)
-    .maybeSingle();
+  // Checks 2 and 3 are independent of each other, and the session list is
+  // needed either way, so all three go out together. Submitting used to be nine
+  // sequential round trips to Supabase; the button sat on "Saving…" for the sum
+  // of them.
+  const [{ data: invited }, { data: person }, { data: pollSessions }] = await Promise.all([
+    supabase
+      .from("poll_invitees")
+      .select("person_id")
+      .eq("poll_id", poll.id)
+      .eq("person_id", personId)
+      .maybeSingle(),
+    supabase.from("people").select("id").eq("id", personId).eq("is_active", true).maybeSingle(),
+    supabase.from("sessions").select("id").eq("poll_id", poll.id),
+  ]);
   if (!invited) {
     return NextResponse.json({ error: "You were not asked to this one" }, { status: 403 });
   }
-
-  const { data: person } = await supabase
-    .from("people")
-    .select("id")
-    .eq("id", personId)
-    .eq("is_active", true)
-    .maybeSingle();
   if (!person) {
     return NextResponse.json({ error: "Not on this roster" }, { status: 403 });
   }
@@ -103,59 +110,67 @@ export async function POST(
     return NextResponse.json({ error: "Some slots are not part of this poll" }, { status: 400 });
   }
 
-  // Replace rather than merge: the grid submits the person's full answer, so a
-  // cleared slot must actually disappear.
-  await supabase.from("availability").delete().eq("poll_id", poll.id).eq("person_id", personId);
-
-  if (accepted.length) {
-    const { error } = await supabase.from("availability").insert(
-      accepted.map((ms) => ({
-        poll_id: poll.id,
-        person_id: personId,
-        slot_start: new Date(ms).toISOString(),
-      })),
-    );
-    if (error) {
-      return NextResponse.json({ error: "Could not save availability" }, { status: 500 });
-    }
-  }
-
   // "Which of these are you up for?" — recorded as opt-OUTS so that an activity
   // added to a running poll counts everyone by default and nobody has to answer
   // again. Only sessions belonging to THIS poll are touched, so a crafted body
   // cannot opt someone out of an activity in someone else's poll.
-  const { data: pollSessions } = await supabase
-    .from("sessions")
-    .select("id")
-    .eq("poll_id", poll.id);
   const sessionIds = new Set((pollSessions ?? []).map((r) => r.id as string));
-
   const optOuts = Array.isArray(body.optOutSessionIds)
     ? [...new Set(body.optOutSessionIds.map(String))].filter((id) => sessionIds.has(id))
     : [];
 
-  if (sessionIds.size) {
-    await supabase
-      .from("session_optouts")
-      .delete()
-      .eq("person_id", personId)
-      .in("session_id", [...sessionIds]);
+  // Both deletes are "replace rather than merge": the grid submits the person's
+  // complete answer, so a cleared slot and an un-ticked activity must actually
+  // disappear. They touch different tables and different rows, so they can go
+  // together — but they must both land before the inserts.
+  await Promise.all([
+    supabase.from("availability").delete().eq("poll_id", poll.id).eq("person_id", personId),
+    sessionIds.size
+      ? supabase
+          .from("session_optouts")
+          .delete()
+          .eq("person_id", personId)
+          .in("session_id", [...sessionIds])
+      : Promise.resolve({ error: null }),
+  ]);
+
+  const [availabilityWrite, optOutWrite] = await Promise.all([
+    accepted.length
+      ? supabase.from("availability").insert(
+          accepted.map((ms) => ({
+            poll_id: poll.id,
+            person_id: personId,
+            slot_start: new Date(ms).toISOString(),
+          })),
+        )
+      : Promise.resolve({ error: null }),
+    optOuts.length
+      ? supabase
+          .from("session_optouts")
+          .insert(optOuts.map((session_id) => ({ session_id, person_id: personId })))
+      : Promise.resolve({ error: null }),
+  ]);
+
+  if (availabilityWrite.error) {
+    return NextResponse.json({ error: "Could not save availability" }, { status: 500 });
   }
-  if (optOuts.length) {
-    const { error } = await supabase
-      .from("session_optouts")
-      .insert(optOuts.map((session_id) => ({ session_id, person_id: personId })));
-    if (error) {
-      return NextResponse.json({ error: "Could not save your activity choices" }, { status: 500 });
-    }
+  if (optOutWrite.error) {
+    return NextResponse.json({ error: "Could not save your activity choices" }, { status: 500 });
   }
 
+  // Deliberately last, and deliberately not batched with the writes above. This
+  // row is what makes the host page count someone as having answered, so it
+  // must not exist unless their answer actually landed. That ordering matters
+  // more now that declines exist: a response row written over a failed
+  // availability insert would be indistinguishable from someone deliberately
+  // saying none of the dates work, and the host would stop chasing them.
   await supabase.from("poll_responses").upsert(
     {
       poll_id: poll.id,
       person_id: personId,
       submitted_at: new Date().toISOString(),
       comment,
+      declined,
     },
     { onConflict: "poll_id,person_id" },
   );

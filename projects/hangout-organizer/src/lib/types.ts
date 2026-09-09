@@ -104,6 +104,12 @@ export interface PollResponse {
   person_id: string;
   submitted_at: string;
   comment: string | null;
+  /**
+   * "None of these work for me." A real answer, not the absence of one — and a
+   * different claim from a session opt-out, which says "I am free then, just
+   * not for that activity". A declined response carries no availability.
+   */
+  declined: boolean;
 }
 
 /**

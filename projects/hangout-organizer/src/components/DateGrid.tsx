@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useCallback, useMemo, useRef } from "react";
 import { buildSlotGrid, formatDayHeader } from "@/lib/slots";
 
 /**
@@ -9,7 +10,7 @@ import { buildSlotGrid, formatDayHeader } from "@/lib/slots";
  * per day, so a matrix would be a single cramped row, and a list gives each
  * date a tap target big enough for a thumb on a phone.
  */
-export function DateGrid({
+function DateGridImpl({
   spec,
   selected,
   onChange,
@@ -25,21 +26,35 @@ export function DateGrid({
   selected: Set<number>;
   onChange: (next: Set<number>) => void;
 }) {
-  const { days, grid } = buildSlotGrid({ ...spec, granularity: "date" });
+  // Depends only on the polled range, so it survives the parent re-rendering
+  // for unrelated reasons (the comment field, the activity tick boxes).
+  const rows = useMemo(() => {
+    const { days, grid } = buildSlotGrid({ ...spec, granularity: "date" });
+    return days.map((day, i) => ({
+      day,
+      key: grid[0][i].getTime(),
+      ...formatDayHeader(day),
+    }));
+  }, [spec.pollStartDate, spec.pollEndDate]);
 
-  function toggle(key: number) {
-    const next = new Set(selected);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    onChange(next);
-  }
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  const toggle = useCallback(
+    (key: number) => {
+      const next = new Set(selectedRef.current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      selectedRef.current = next;
+      onChange(next);
+    },
+    [onChange],
+  );
 
   return (
     <div className="grid gap-2 sm:grid-cols-2">
-      {days.map((day, i) => {
-        const key = grid[0][i].getTime();
+      {rows.map(({ day, key, weekday, dayOfMonth, month }) => {
         const on = selected.has(key);
-        const { weekday, dayOfMonth, month } = formatDayHeader(day);
         const weekend = weekday === "Sat" || weekday === "Sun";
         return (
           <button
@@ -60,9 +75,7 @@ export function DateGrid({
                 {weekday} {dayOfMonth} {month}
               </span>
               {weekend && (
-                <span
-                  className={`block text-xs ${on ? "text-emerald-50" : "text-slate-400"}`}
-                >
+                <span className={`block text-xs ${on ? "text-emerald-50" : "text-slate-400"}`}>
                   weekend
                 </span>
               )}
@@ -74,3 +87,5 @@ export function DateGrid({
     </div>
   );
 }
+
+export const DateGrid = memo(DateGridImpl);

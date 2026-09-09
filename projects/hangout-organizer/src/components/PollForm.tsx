@@ -19,6 +19,8 @@ interface Props {
   /** person_id -> slot timestamps they already submitted, so answers are editable. */
   existing: Record<string, number[]>;
   respondedIds: string[];
+  /** Who has already answered "none of these work". A subset of respondedIds. */
+  declinedIds: string[];
   /** The activities this poll is trying to arrange. */
   sessions: GameSession[];
   /** person_id -> session_ids they previously said they were not up for. */
@@ -31,6 +33,7 @@ export function PollForm({
   roster,
   existing,
   respondedIds,
+  declinedIds,
   sessions,
   existingOptOuts,
 }: Props) {
@@ -39,17 +42,21 @@ export function PollForm({
   const [comment, setComment] = useState("");
   // Opt-outs, so an activity added later counts everyone until they say no.
   const [optOut, setOptOut] = useState<Set<string>>(new Set());
+  // "None of these work for me" — an answer in its own right, not an empty one.
+  const [declined, setDeclined] = useState(false);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const responded = new Set(respondedIds);
+  const declinedSet = new Set(declinedIds);
 
   function pick(person: Person) {
     setPersonId(person.id);
     setSelected(new Set(existing[person.id] ?? []));
     setOptOut(new Set(existingOptOuts[person.id] ?? []));
+    setDeclined(declinedSet.has(person.id));
     setStatus("idle");
   }
 
-  async function submit() {
+  async function submit(asDecline: boolean) {
     if (!personId) return;
     setStatus("saving");
     try {
@@ -58,11 +65,16 @@ export function PollForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           personId,
-          slots: [...selected].map((ms) => new Date(ms).toISOString()),
+          slots: asDecline ? [] : [...selected].map((ms) => new Date(ms).toISOString()),
           comment: comment.trim() || null,
           optOutSessionIds: [...optOut],
+          declined: asDecline,
         }),
       });
+      if (res.ok) {
+        setDeclined(asDecline);
+        if (asDecline) setSelected(new Set());
+      }
       setStatus(res.ok ? "saved" : "error");
     } catch {
       setStatus("error");
@@ -83,7 +95,13 @@ export function PollForm({
             >
               {person.display_name}
               {responded.has(person.id) && (
-                <span className="mt-0.5 block text-xs font-normal text-emerald-700">answered</span>
+                <span
+                  className={`mt-0.5 block text-xs font-normal ${
+                    declinedSet.has(person.id) ? "text-slate-500" : "text-emerald-700"
+                  }`}
+                >
+                  {declinedSet.has(person.id) ? "can't make it" : "answered"}
+                </span>
               )}
             </button>
           ))}
@@ -98,15 +116,18 @@ export function PollForm({
   }
 
   const me = roster.find((p) => p.id === personId);
+  const byDate = spec.granularity === "date";
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-medium">
           {me?.display_name},{" "}
-          {spec.granularity === "date"
-            ? "tap the dates that work for you"
-            : "drag the times you can make"}
+          {declined
+            ? "you said none of these work"
+            : byDate
+              ? "tap the dates that work for you"
+              : "drag the times you can make"}
         </h2>
         <button
           type="button"
@@ -117,19 +138,47 @@ export function PollForm({
         </button>
       </div>
 
-      <p className="mb-3 text-sm text-slate-600">
-        {spec.granularity === "date"
-          ? "Tap every date you could do. Tap again to clear one."
-          : "Tap or drag to mark yourself free. Drag over green slots again to clear them."}
-      </p>
-
-      {spec.granularity === "date" ? (
-        <DateGrid spec={spec} selected={selected} onChange={setSelected} />
+      {declined ? (
+        /*
+         * The grid is replaced rather than disabled. A greyed-out grid still
+         * invites tapping and leaves the person unsure whether their answer
+         * registered; this states the answer plainly and offers exactly one way
+         * back, which is what someone who tapped it by accident needs.
+         */
+        <div className="rounded-xl border border-slate-300 bg-slate-50 p-4">
+          <p className="text-sm text-slate-700">
+            You are down as not free for any of{" "}
+            {byDate ? "these dates" : "the times being polled"}. The host can see that, so nobody
+            will chase you about it.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setDeclined(false);
+              setStatus("idle");
+            }}
+            className="mt-3 text-sm font-medium text-slate-900 underline"
+          >
+            Actually, let me pick {byDate ? "dates" : "times"}
+          </button>
+        </div>
       ) : (
-        <AvailabilityGrid spec={spec} selected={selected} onChange={setSelected} />
+        <>
+          <p className="mb-3 text-sm text-slate-600">
+            {byDate
+              ? "Tap every date you could do. Tap again to clear one."
+              : "Tap or drag to mark yourself free. Drag over green slots again to clear them."}
+          </p>
+
+          {byDate ? (
+            <DateGrid spec={spec} selected={selected} onChange={setSelected} />
+          ) : (
+            <AvailabilityGrid spec={spec} selected={selected} onChange={setSelected} />
+          )}
+        </>
       )}
 
-      {sessions.length > 1 && (
+      {!declined && sessions.length > 1 && (
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <h3 className="text-sm font-medium">Which of these are you up for?</h3>
           <p className="mt-0.5 text-xs text-slate-500">
@@ -180,27 +229,53 @@ export function PollForm({
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={submit}
+            onClick={() => submit(declined)}
             disabled={status === "saving"}
             className="rounded-lg bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
           >
-            {status === "saving" ? "Saving…" : "Submit"}
+            {status === "saving" ? "Saving…" : declined ? "Save my note" : "Submit"}
           </button>
-          <button
-            type="button"
-            onClick={() => setSelected(new Set())}
-            className="text-sm text-slate-500 underline"
-          >
-            Clear all
-          </button>
-          <span className="text-sm text-slate-500">
-            {selected.size} {spec.granularity === "date" ? "dates" : "slots"} selected
-          </span>
+          {!declined && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="text-sm text-slate-500 underline"
+              >
+                Clear all
+              </button>
+              <span className="text-sm text-slate-500">
+                {selected.size} {byDate ? "dates" : "slots"} selected
+              </span>
+            </>
+          )}
         </div>
+
+        {!declined && (
+          /*
+           * Separated from Submit, and worded as the sentence someone would
+           * actually say. Submitting an empty grid would record the same thing,
+           * but nobody guesses that — without this they either leave the link
+           * unanswered or invent a slot they cannot really make, and both are
+           * worse for the host than a plain no.
+           */
+          <div className="border-t border-slate-200 pt-3">
+            <button
+              type="button"
+              onClick={() => submit(true)}
+              disabled={status === "saving"}
+              className="text-sm font-medium text-slate-600 underline hover:text-slate-900 disabled:opacity-50"
+            >
+              I can&apos;t make any of {byDate ? "these dates" : "these times"}
+            </button>
+          </div>
+        )}
 
         {status === "saved" && (
           <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">
-            Saved. You can come back and change this any time before the host books.
+            {declined
+              ? "Saved — you are down as not free for this one. You can change it any time before the host books."
+              : "Saved. You can come back and change this any time before the host books."}
           </p>
         )}
         {status === "error" && (

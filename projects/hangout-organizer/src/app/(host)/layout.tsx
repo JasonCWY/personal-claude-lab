@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { HOST_EMAIL } from "@/lib/env";
+import { getHostIdentity } from "@/lib/auth";
 
 const NAV = [
   { href: "/", label: "Dashboard" },
@@ -17,13 +16,9 @@ const NAV = [
  * anyone other than the host.
  */
 export default async function HostLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-  if ((user.email ?? "").toLowerCase() !== HOST_EMAIL()) redirect("/login?error=not_host");
+  const { signedIn, hostEmail } = await getHostIdentity();
+  if (!signedIn) redirect("/login");
+  if (!hostEmail) redirect("/login?error=not_host");
 
   return (
     <div className="min-h-screen">

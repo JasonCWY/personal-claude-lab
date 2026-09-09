@@ -45,41 +45,72 @@ export default async function PollPage({
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
-  const { data: pollData } = await supabase.from("polls").select("*").eq("id", id).single<Poll>();
-  if (!pollData) notFound();
-  const poll = pollData;
-
+  // Two round trips, not five. Everything keyed off the poll ID from the URL
+  // goes out at once — the poll row is not a prerequisite for any of it — and
+  // the second wave is only the queries that genuinely need an ID list from the
+  // first. This page used to be five sequential Supabase hops before a single
+  // byte of HTML was produced, and that stack of latency was most of the wait.
   const [
+    { data: pollData },
     { data: sessionData },
     { data: inviteeData },
     { data: availabilityData },
     { data: responseData },
     { data: sportData },
     { data: venueData },
-    { data: groupData },
   ] = await Promise.all([
+    supabase.from("polls").select("*").eq("id", id).maybeSingle<Poll>(),
     supabase.from("sessions").select("*").eq("poll_id", id).order("created_at"),
     supabase.from("poll_invitees").select("person_id").eq("poll_id", id),
-    supabase.from("availability").select("*").eq("poll_id", id),
+    supabase.from("availability").select("person_id, slot_start").eq("poll_id", id),
     supabase.from("poll_responses").select("*").eq("poll_id", id),
     supabase.from("sports").select("*").order("name"),
     supabase.from("venues").select("*").eq("is_active", true).order("name"),
+  ]);
+
+  if (!pollData) notFound();
+  const poll = pollData;
+
+  const sessions = (sessionData ?? []) as GameSession[];
+  const availability = (availabilityData ?? []) as AvailabilityRow[];
+  const responses = (responseData ?? []) as PollResponse[];
+  const sports = (sportData ?? []) as Sport[];
+  const venues = (venueData ?? []) as Venue[];
+
+  const inviteeIds = (inviteeData ?? []).map((r) => r.person_id as string);
+  const sessionIds = sessions.map((s) => s.id);
+  // Attendees are only read for sessions that got confirmed.
+  const confirmed = sessions.filter((s) => s.status === "confirmed" && s.confirmed_start_at);
+
+  const [
+    { data: peopleData },
+    { data: optOutData },
+    { data: attendeeData },
+    { data: groupData },
+  ] = await Promise.all([
+    inviteeIds.length
+      ? supabase.from("people").select("*").in("id", inviteeIds).order("display_name")
+      : Promise.resolve({ data: [] as Person[] }),
+    // Who said "not this one" about which activity. Absence means in, so an
+    // activity added mid-poll counts everyone until they say otherwise.
+    sessionIds.length
+      ? supabase.from("session_optouts").select("*").in("session_id", sessionIds)
+      : Promise.resolve({ data: [] as SessionOptOut[] }),
+    confirmed.length
+      ? supabase
+          .from("attendees")
+          .select("session_id, person_id")
+          .in(
+            "session_id",
+            confirmed.map((s) => s.id),
+          )
+      : Promise.resolve({ data: [] as { session_id: string; person_id: string }[] }),
     poll.group_id
       ? supabase.from("roster_groups").select("*").eq("id", poll.group_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
-  const inviteeIds = (inviteeData ?? []).map((r) => r.person_id as string);
-  const { data: peopleData } = inviteeIds.length
-    ? await supabase.from("people").select("*").in("id", inviteeIds).order("display_name")
-    : { data: [] as Person[] };
-
-  const sessions = (sessionData ?? []) as GameSession[];
   const roster = (peopleData ?? []) as Person[];
-  const availability = (availabilityData ?? []) as AvailabilityRow[];
-  const responses = (responseData ?? []) as PollResponse[];
-  const sports = (sportData ?? []) as Sport[];
-  const venues = (venueData ?? []) as Venue[];
   const group = (groupData ?? null) as RosterGroup | null;
 
   const entries = availability.map((row) => ({
@@ -88,17 +119,6 @@ export default async function PollPage({
   }));
   const slotCounts = computeSlotCounts(entries);
 
-  // Who said "not this one" about which activity. Absence means in, so an
-  // activity added mid-poll counts everyone until they say otherwise.
-  const { data: optOutData } = sessions.length
-    ? await supabase
-        .from("session_optouts")
-        .select("*")
-        .in(
-          "session_id",
-          sessions.map((s) => s.id),
-        )
-    : { data: [] };
   const optOutsBySession = new Map<string, Set<string>>();
   for (const row of (optOutData ?? []) as SessionOptOut[]) {
     const set = optOutsBySession.get(row.session_id) ?? new Set<string>();
@@ -107,6 +127,17 @@ export default async function PollPage({
   }
   const pending = pendingResponders(roster, responses.map((r) => r.person_id));
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
+
+  // A decline is an answer, so these people are not in `pending` — the host has
+  // heard from them and should not chase them. But they contribute no
+  // availability, so without naming them here the host sees "6 of 8 answered"
+  // over a thin heatmap and cannot tell whether the missing two are a quiet no
+  // or a poll that simply has not landed yet.
+  const declinedNames = responses
+    .filter((r) => r.declined)
+    .map((r) => names.get(r.person_id) ?? r.person_id)
+    .sort();
+  const declinedIds = new Set(responses.filter((r) => r.declined).map((r) => r.person_id));
 
   const byDate = poll.granularity === "date";
 
@@ -136,21 +167,10 @@ export default async function PollPage({
     .filter(Boolean)
     .join("\n");
 
-  // Confirmed bookings across this poll. This check is the reason availability
-  // lives on the poll rather than the session: two activities over the same
-  // dates can be confirmed into the same hour with the same players, and
-  // nothing was previously in a position to notice.
-  const confirmed = sessions.filter((s) => s.status === "confirmed" && s.confirmed_start_at);
-  const { data: attendeeData } = confirmed.length
-    ? await supabase
-        .from("attendees")
-        .select("*")
-        .in(
-          "session_id",
-          confirmed.map((s) => s.id),
-        )
-    : { data: [] };
-
+  // Clashes across this poll's confirmed bookings. This check is the reason
+  // availability lives on the poll rather than the session: two activities over
+  // the same dates can be confirmed into the same hour with the same players,
+  // and nothing was previously in a position to notice.
   const attendeesBySession = new Map<string, string[]>();
   for (const a of attendeeData ?? []) {
     const sid = a.session_id as string;
@@ -214,6 +234,7 @@ export default async function PollPage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-medium">
             Who is free — {responses.length} of {roster.length} answered
+            {declinedNames.length > 0 && `, ${declinedNames.length} can't make it`}
           </h2>
           {pending.length > 0 && (
             <p className="text-sm text-slate-500">
@@ -221,6 +242,12 @@ export default async function PollPage({
             </p>
           )}
         </div>
+        {declinedNames.length > 0 && (
+          <p className="mb-3 text-sm text-slate-500">
+            Not free for any of this window: {declinedNames.join(", ")} — they have answered, so
+            there is nothing to chase.
+          </p>
+        )}
         {entries.length === 0 ? (
           <Empty>Nobody has answered yet. Paste the link into the group chat.</Empty>
         ) : (
@@ -253,7 +280,15 @@ export default async function PollPage({
         // People who answered before this activity was added never saw it, so
         // they are being counted without having said yes. Worth naming.
         const answeredBefore = responses
-          .filter((r) => r.submitted_at < session.created_at && !optedOut.has(r.person_id))
+          .filter(
+            (r) =>
+              r.submitted_at < session.created_at &&
+              !optedOut.has(r.person_id) &&
+              // Someone who declined the whole window contributes no times, so
+              // they are not being counted for this activity and naming them
+              // here would send the host chasing a question already answered.
+              !declinedIds.has(r.person_id),
+          )
           .map((r) => names.get(r.person_id) ?? r.person_id)
           .sort();
 

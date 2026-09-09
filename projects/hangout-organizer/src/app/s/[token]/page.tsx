@@ -44,40 +44,52 @@ export default async function PublicPollPage({
     { data: sessionData },
   ] = await Promise.all([
     supabase.from("poll_invitees").select("person_id").eq("poll_id", poll.id),
-    supabase.from("availability").select("*").eq("poll_id", poll.id),
-    supabase.from("poll_responses").select("*").eq("poll_id", poll.id),
+    supabase.from("availability").select("person_id, slot_start").eq("poll_id", poll.id),
+    supabase.from("poll_responses").select("person_id, declined").eq("poll_id", poll.id),
     supabase.from("sessions").select("*").eq("poll_id", poll.id).order("created_at"),
   ]);
 
   const inviteeIds = (inviteeData ?? []).map((r) => r.person_id as string);
-  const { data: peopleData } = inviteeIds.length
-    ? await supabase
-        .from("people")
-        .select("*")
-        .in("id", inviteeIds)
-        .eq("is_active", true)
-        .order("display_name")
-    : { data: [] as Person[] };
+  const sessions = (sessionData ?? []) as GameSession[];
+
+  // The roster and the opt-outs each need an ID list from the wave above, but
+  // not from each other — so they go out together rather than one after the
+  // other. This is the friend-facing page, opened from a phone on mobile data,
+  // where every avoidable round trip is felt.
+  const [{ data: peopleData }, { data: optOutData }] = await Promise.all([
+    inviteeIds.length
+      ? supabase
+          .from("people")
+          .select("*")
+          .in("id", inviteeIds)
+          .eq("is_active", true)
+          .order("display_name")
+      : Promise.resolve({ data: [] as Person[] }),
+    // Which activities each person has said they are not up for, so returning
+    // to the link shows their previous answer rather than resetting it.
+    sessions.length
+      ? supabase
+          .from("session_optouts")
+          .select("*")
+          .in(
+            "session_id",
+            sessions.map((s) => s.id),
+          )
+      : Promise.resolve({ data: [] as SessionOptOut[] }),
+  ]);
 
   const roster = (peopleData ?? []) as Person[];
-  const sessions = (sessionData ?? []) as GameSession[];
 
   const existing: Record<string, number[]> = {};
   for (const row of (availabilityData ?? []) as AvailabilityRow[]) {
     (existing[row.person_id] ??= []).push(new Date(row.slot_start).getTime());
   }
 
-  // Which activities each person has said they are not up for, so returning to
-  // the link shows their previous answer rather than resetting it.
-  const { data: optOutData } = sessions.length
-    ? await supabase
-        .from("session_optouts")
-        .select("*")
-        .in(
-          "session_id",
-          sessions.map((s) => s.id),
-        )
-    : { data: [] };
+  // Who has already said none of the dates work, so returning to the link shows
+  // that back rather than a blank grid that looks like they never answered.
+  const responses = (responseData ?? []) as PollResponse[];
+  const declinedIds = responses.filter((r) => r.declined).map((r) => r.person_id);
+
   const existingOptOuts: Record<string, string[]> = {};
   for (const row of (optOutData ?? []) as SessionOptOut[]) {
     (existingOptOuts[row.person_id] ??= []).push(row.session_id);
@@ -157,7 +169,8 @@ export default async function PublicPollPage({
             spec={spec}
             roster={roster}
             existing={existing}
-            respondedIds={((responseData ?? []) as PollResponse[]).map((r) => r.person_id)}
+            respondedIds={responses.map((r) => r.person_id)}
+            declinedIds={declinedIds}
             sessions={sessions}
             existingOptOuts={existingOptOuts}
           />
