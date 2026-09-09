@@ -71,20 +71,23 @@ export default async function TemplatesPage() {
                   <li key={item.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <span>{item.title}</span>
                     {item.days_before_offset != null && (
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-ink-soft">
                         {item.days_before_offset}d before
                       </span>
                     )}
-                    {item.notes && <span className="text-xs text-slate-500">— {item.notes}</span>}
+                    {item.notes && <span className="text-xs text-ink-soft">— {item.notes}</span>}
                     <form action={deleteTemplateItem} className="ml-auto">
                       <input type="hidden" name="id" value={item.id} />
-                      <button type="submit" className="text-xs text-rose-600 underline">
+                      <button
+                        type="submit"
+                        className="rounded-lg px-2 py-1.5 text-xs text-bad-fg underline transition-colors hover:text-ink"
+                      >
                         remove
                       </button>
                     </form>
                   </li>
                 ))}
-                {own.length === 0 && <li className="text-sm text-slate-500">No items yet.</li>}
+                {own.length === 0 && <li className="text-sm text-ink-soft">No items yet.</li>}
               </ul>
 
               <form action={addTemplateItem} className="flex flex-wrap items-end gap-2">
@@ -106,7 +109,7 @@ export default async function TemplatesPage() {
         })}
       </div>
 
-      <p className="mt-6 text-xs text-slate-500">
+      <p className="mt-6 text-xs text-ink-soft">
         &quot;Days before&quot; turns into a real due date when you create an event with a date set.
       </p>
     </>

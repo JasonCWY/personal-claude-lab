@@ -64,10 +64,10 @@ function DateGridImpl({
             aria-checked={on}
             aria-label={`${weekday} ${dayOfMonth} ${month}`}
             onClick={() => toggle(key)}
-            className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+            className={`flex min-h-tap items-center justify-between rounded-xl border px-4 py-3 text-left transition active:scale-[0.99] ${
               on
-                ? "border-emerald-600 bg-emerald-500 text-white"
-                : "border-slate-300 bg-white hover:border-slate-500"
+                ? "border-ok-solid bg-ok-solid text-ok-solid-fg"
+                : "border-line-strong bg-surface hover:border-accent"
             }`}
           >
             <span>
@@ -75,7 +75,7 @@ function DateGridImpl({
                 {weekday} {dayOfMonth} {month}
               </span>
               {weekend && (
-                <span className={`block text-xs ${on ? "text-emerald-50" : "text-slate-400"}`}>
+                <span className={`block text-xs ${on ? "text-ok-solid-fg/80" : "text-ink-faint"}`}>
                   weekend
                 </span>
               )}

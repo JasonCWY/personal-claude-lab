@@ -90,9 +90,9 @@ export default async function VenuesPage() {
           {venues.map((venue) => (
             <Card key={venue.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <h3 className="font-medium">{venue.name}</h3>
-                  <p className="mt-0.5 text-sm text-slate-600">
+                  <p className="mt-0.5 text-sm text-ink-muted">
                     {[
                       venue.sport_id ? sportName.get(venue.sport_id) : null,
                       venue.platform_name,
@@ -109,9 +109,9 @@ export default async function VenuesPage() {
                       .filter(Boolean)
                       .join(" · ") || "No details yet"}
                   </p>
-                  {venue.address && <p className="mt-1 text-sm text-slate-500">{venue.address}</p>}
+                  {venue.address && <p className="mt-1 text-sm text-ink-soft">{venue.address}</p>}
                   {venue.notes && (
-                    <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{venue.notes}</p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-ink-muted">{venue.notes}</p>
                   )}
                 </div>
                 <div className="flex shrink-0 gap-2">
@@ -120,7 +120,7 @@ export default async function VenuesPage() {
                       href={venue.booking_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                      className="inline-flex min-h-tap items-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium transition hover:bg-surface-2"
                     >
                       Open booking
                     </a>

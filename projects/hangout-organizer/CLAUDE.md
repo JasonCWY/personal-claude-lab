@@ -95,6 +95,9 @@ src/
     ActivityPicker.tsx       Which sports this poll is trying to book.
     GroupEditor.tsx          Create and edit roster groups.
     ShareMessage.tsx         Editable WhatsApp message preview + copy.
+    MonthCalendar.tsx        Month grid; dots + an agenda list below `sm`.
+    HostNav.tsx              The five host destinations: inline bar, or bottom tabs on a phone.
+    ThemeToggle.tsx          Light / match device / dark. Writes the preference only.
   app/
     (host)/                  Behind auth: dashboard, polls, calendar, venues,
                              roster + groups, events, templates.
@@ -138,6 +141,33 @@ src/
 - **A `day_end_time` at or before `day_start_time` means the NEXT day.** 22:00–00:00 is an ordinary
   evening session and must work; 21:00–01:00 rolls the post-midnight slots onto the following
   date. Only equality is rejected, since that would mean 24 hours.
+- **Colour is only ever named semantically, never as a palette step.** `tailwind.config.ts` maps
+  tokens — `surface`, `ink`, `line`, `accent`, `ok`/`warn`/`bad`/`info`, `slot`, `heat` — onto CSS
+  variables, and `globals.css` defines those variables twice: once on `:root` and once under
+  `.dark`. So a component written as `bg-surface text-ink` is correct in both themes by
+  construction, and adding a theme is one block of variables rather than a second class on every
+  element. **A literal `bg-white`, `text-slate-500` or `bg-emerald-100` anywhere in `src/` is a
+  bug**: it will look right in light mode and wrong in dark, which is exactly the failure nobody
+  notices in review. `grep -r "slate-\|bg-white\|emerald-" src` should stay empty.
+- **Every foreground/background token pair clears WCAG AA in BOTH themes**, and that is checked
+  arithmetically, not by eye. Inverting a palette does not preserve contrast: a mid-emerald dark
+  enough for white text on a white page is too dark to read as "selected" on a dark one, so the
+  filled greens and ambers flip their *foreground* between themes while the fill stays saturated.
+  The hot end of the heatmap ramp and the amber "short session" bar both failed AA before this and
+  looked perfectly fine. If you add or retune a token, recompute the ratios.
+- **The theme is applied by an inline script in the root layout, before first paint.** Doing it in
+  React would render light, hydrate, then switch — the white flash that gives away a bolted-on
+  dark mode. That is also why `<html>` carries `suppressHydrationWarning`: the script mutates its
+  class list before React ever sees it. `ThemeToggle` only writes the preference and re-applies
+  it; it never owns the initial value.
+- **44px is the tap-target floor** (`min-h-tap`). Most people open this app on a phone, and the
+  friend-facing pages are opened on a phone by someone who has never seen it before. Fields keep
+  `text-base` for a second reason: iOS Safari zooms the page when a focused input's text is under
+  16px and does not zoom back out.
+- **`position: sticky` needs a scroll container that actually scrolls on that axis.** `overflow-x`
+  makes an element a scroll container on *both* axes, so a `sticky top-0` inside one of the grid
+  wrappers silently never fires. The sticky time column works because that is the axis the
+  wrapper scrolls; a sticky day-header row would not, and was removed rather than left inert.
 - **Sharing is a clipboard hand-off, not an integration.** The WhatsApp Business API is neither
   free nor worth it here; `CopyLink` builds a paste-ready message instead.
 

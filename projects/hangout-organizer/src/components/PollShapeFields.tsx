@@ -24,7 +24,7 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
       <input type="hidden" name="granularity" value={shape} />
 
       <div className="sm:col-span-2">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-soft">
           What are you asking
         </h2>
         <div className="flex flex-wrap gap-2">
@@ -38,14 +38,14 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
               key={value}
               type="button"
               onClick={() => setShape(value)}
-              className={`flex-1 rounded-xl border p-3 text-left ${
+              className={`min-w-[12rem] flex-1 rounded-xl border p-3 text-left transition active:scale-[0.99] ${
                 shape === value
-                  ? "border-slate-900 bg-slate-50"
-                  : "border-slate-300 bg-white hover:bg-slate-50"
+                  ? "border-accent bg-surface-2"
+                  : "border-line-strong bg-surface hover:bg-surface-2"
               }`}
             >
               <span className="block text-sm font-medium">{label}</span>
-              <span className="block text-xs text-slate-500">{hint}</span>
+              <span className="block text-xs text-ink-soft">{hint}</span>
             </button>
           ))}
         </div>
@@ -54,48 +54,48 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
       {shape === "time" ? (
         <>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Earliest start</label>
+            <label className="mb-1 block text-sm font-medium text-ink-muted">Earliest start</label>
             <input
               type="time"
               name="day_start_time"
               required
               defaultValue="18:00"
               step={900}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+              className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Latest end</label>
+            <label className="mb-1 block text-sm font-medium text-ink-muted">Latest end</label>
             <input
               type="time"
               name="day_end_time"
               required
               defaultValue="22:00"
               step={900}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+              className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-ink-soft">
               00:00 means the end of that evening. Past midnight is fine.
             </p>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Slot size</label>
+            <label className="mb-1 block text-sm font-medium text-ink-muted">Slot size</label>
             <select
               name="slot_minutes"
               defaultValue="60"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+              className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
             >
               <option value="60">60 minutes</option>
               <option value="30">30 minutes</option>
             </select>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-ink-soft">
               Coarser slots mean less to tap on a phone, and courts book by the hour anyway.
             </p>
           </div>
           <div />
 
           <div className="sm:col-span-2">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-soft">
               What are you trying to book
             </h2>
             <div className="space-y-2">
@@ -106,12 +106,13 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
                   <div
                     key={sport.id}
                     className={`rounded-xl border p-3 ${
-                      on ? "border-slate-900 bg-slate-50" : "border-slate-200 bg-white"
+                      on ? "border-accent bg-surface-2" : "border-line bg-surface"
                     }`}
                   >
-                    <label className="flex cursor-pointer items-center gap-3">
+                    <label className="flex min-h-tap cursor-pointer flex-wrap items-center gap-x-3 gap-y-1">
                       <input
                         type="checkbox"
+                        className="h-4 w-4 accent-ok-solid"
                         name="session_sport_ids"
                         value={sport.id}
                         checked={on}
@@ -125,7 +126,7 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
                         }
                       />
                       <span className="font-medium">{sport.name}</span>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-ink-soft">
                         {sport.min_players_full} for {sport.full_duration_minutes / 60}hr, or{" "}
                         {sport.min_players_short} for {sport.short_duration_minutes / 60}hr
                       </span>
@@ -133,13 +134,13 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
 
                     {on && forSport.length > 0 && (
                       <div className="mt-2 pl-7">
-                        <label className="mb-1 block text-xs text-slate-500">
+                        <label className="mb-1 block text-xs text-ink-soft">
                           Likely venue — optional
                         </label>
                         <select
                           name={`venue_${sport.id}`}
                           defaultValue=""
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm sm:max-w-xs"
+                          className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 sm:max-w-xs"
                         >
                           <option value="">Decide later</option>
                           {forSport.map((v) => (
@@ -154,7 +155,7 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
                 );
               })}
             </div>
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-ink-soft">
               Thresholds are copied onto each activity now, so editing the sport later never
               rewrites a poll already running.
             </p>
@@ -166,32 +167,32 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
           <input type="hidden" name="day_end_time" value="00:00" />
           <input type="hidden" name="slot_minutes" value="1440" />
 
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-soft">
             What are you planning
           </h2>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="sm:col-span-3">
-              <label className="mb-1 block text-sm font-medium text-slate-700">Name it</label>
+              <label className="mb-1 block text-sm font-medium text-ink-muted">Name it</label>
               <input
                 name="date_activity_title"
                 required
                 placeholder="e.g. Penang trip"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">How many days</label>
+              <label className="mb-1 block text-sm font-medium text-ink-muted">How many days</label>
               <input
                 type="number"
                 name="date_full_days"
                 min="1"
                 max="30"
                 defaultValue="3"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Need this many people
               </label>
               <input
@@ -199,11 +200,11 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
                 name="date_min_players_full"
                 min="1"
                 defaultValue="4"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Or settle for</label>
+              <label className="mb-1 block text-sm font-medium text-ink-muted">Or settle for</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -211,7 +212,7 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
                   min="1"
                   defaultValue="3"
                   aria-label="Fallback number of people"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
                 />
                 <input
                   type="number"
@@ -220,13 +221,13 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
                   max="30"
                   defaultValue="2"
                   aria-label="Fallback number of days"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
                 />
               </div>
-              <p className="mt-1 text-xs text-slate-500">people / days</p>
+              <p className="mt-1 text-xs text-ink-soft">people / days</p>
             </div>
           </div>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-ink-soft">
             The app looks for runs of consecutive days that the same people are all free for — the
             same rule as the hourly polls, with a day-sized slot.
           </p>

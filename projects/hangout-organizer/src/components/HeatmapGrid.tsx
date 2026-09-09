@@ -31,32 +31,35 @@ export function HeatmapGrid({
   const max = Math.max(1, ...[...slotCounts.values()].map((v) => v.length));
 
   function shade(count: number): string {
-    if (count === 0) return "bg-white";
+    if (count === 0) return "bg-surface";
     const ratio = count / max;
-    if (ratio <= 0.25) return "bg-emerald-100";
-    if (ratio <= 0.5) return "bg-emerald-200";
-    if (ratio <= 0.75) return "bg-emerald-400 text-white";
-    return "bg-emerald-600 text-white";
+    // The two pale steps carry dark text and the two saturated ones light. The
+    // ramp inverts between themes but that pairing does not, so a count stays
+    // readable at every density in both.
+    if (ratio <= 0.25) return "bg-heat-1 text-ok-fg";
+    if (ratio <= 0.5) return "bg-heat-2 text-ok-fg";
+    if (ratio <= 0.75) return "bg-heat-3 text-heat-fg";
+    return "bg-heat-4 text-heat-fg";
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="-mx-1 scroll-x px-1">
       <table className="min-w-full border-separate border-spacing-0.5 text-center text-xs">
         <thead>
           <tr>
-            <th className="sticky left-0 bg-white px-2 py-1" />
+            <th className="sticky left-0 bg-surface px-2 py-1" />
             {days.map((day, i) => {
               const { weekday, dayOfMonth, month } = formatDayHeader(day);
               const showMonth = i === 0 || formatDayHeader(days[i - 1]).month !== month;
               return (
-                <th key={day} className="px-2 py-1 font-medium text-slate-600">
-                  <div className="text-[0.7rem] uppercase tracking-wide text-slate-400">
+                <th key={day} className="px-2 py-1 font-medium text-ink-muted">
+                  <div className="text-[0.7rem] uppercase tracking-wide text-ink-faint">
                     {weekday}
                   </div>
-                  <div className="text-sm font-semibold text-slate-700">{dayOfMonth}</div>
+                  <div className="text-sm font-semibold text-ink-muted">{dayOfMonth}</div>
                   <div
                     className={`text-[0.65rem] ${
-                      showMonth ? "text-slate-500" : "text-transparent"
+                      showMonth ? "text-ink-soft" : "text-transparent"
                     }`}
                   >
                     {month}
@@ -69,7 +72,7 @@ export function HeatmapGrid({
         <tbody>
           {times.map((time, ti) => (
             <tr key={time}>
-              <th className="sticky left-0 whitespace-nowrap bg-white px-2 py-1 text-right font-normal tabular-nums text-slate-500">
+              <th className="sticky left-0 whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
                 <span className="text-[0.7rem]">
                   {spec.granularity === "date"
                     ? "free"
@@ -90,7 +93,7 @@ export function HeatmapGrid({
                         ? people.map((id) => names.get(id) ?? id).join(", ")
                         : "nobody free"
                     }`}
-                    className={`h-8 min-w-[2.75rem] rounded font-medium ${shade(people.length)}`}
+                    className={`h-9 min-w-[2.75rem] rounded font-medium sm:h-8 ${shade(people.length)}`}
                   >
                     {people.length || ""}
                   </td>
@@ -100,6 +103,11 @@ export function HeatmapGrid({
           ))}
         </tbody>
       </table>
+      {days.length > 4 && (
+        <p className="mt-2 text-center text-xs text-ink-faint sm:hidden">
+          Swipe sideways for the rest of the days.
+        </p>
+      )}
     </div>
   );
 }

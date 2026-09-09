@@ -124,23 +124,31 @@ function AvailabilityGridImpl({ spec, selected, onChange }: Props) {
   );
 
   return (
-    <div className="overflow-x-auto">
+    <div className="-mx-1 scroll-x px-1">
       <div onPointerMove={onPointerMove}>
-        <table className="min-w-full border-separate border-spacing-0.5 text-center text-xs select-none">
+        <table className="min-w-full border-separate border-spacing-0.5 select-none text-center text-xs">
+          {/*
+            No `sticky top-0` on this row, deliberately. The wrapper sets
+            overflow-x, which per spec makes it a scroll container on BOTH axes,
+            so a vertical sticky offset would resolve against a box that never
+            scrolls vertically and simply never fire. Pinning the day names
+            would mean giving the grid its own capped height and a nested
+            scroll area, which is worse on a phone than losing the header.
+          */}
           <thead>
             <tr>
-              <th className="sticky left-0 z-10 bg-slate-50 px-1 py-1" />
+              <th className="sticky left-0 z-10 bg-surface px-1 py-1" />
               {days.map((day, i) => {
                 const { weekday, dayOfMonth, month, showMonth } = dayHeaders[i];
                 return (
-                  <th key={day} className="px-1 py-1 font-medium text-slate-600">
-                    <div className="text-[0.7rem] uppercase tracking-wide text-slate-400">
+                  <th key={day} className="bg-surface px-1 py-1 font-medium text-ink-muted">
+                    <div className="text-[0.7rem] uppercase tracking-wide text-ink-faint">
                       {weekday}
                     </div>
-                    <div className="text-sm font-semibold text-slate-700">{dayOfMonth}</div>
+                    <div className="text-sm font-semibold text-ink-muted">{dayOfMonth}</div>
                     <div
                       className={`text-[0.65rem] ${
-                        showMonth ? "text-slate-500" : "text-transparent"
+                        showMonth ? "text-ink-soft" : "text-transparent"
                       }`}
                     >
                       {month}
@@ -153,7 +161,7 @@ function AvailabilityGridImpl({ spec, selected, onChange }: Props) {
           <tbody>
             {times.map((time, ti) => (
               <tr key={time}>
-                <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-2 py-1 text-right font-normal tabular-nums text-slate-500">
+                <th className="sticky left-0 z-10 whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
                   <span className="text-[0.7rem]">{timeLabels[ti]}</span>
                 </th>
                 {days.map((day, di) => {
@@ -182,8 +190,8 @@ function AvailabilityGridImpl({ spec, selected, onChange }: Props) {
                             apply(key);
                           }
                         }}
-                        className={`h-9 min-w-[2.75rem] cursor-pointer rounded transition-colors ${
-                          on ? "bg-emerald-500" : "bg-slate-200 hover:bg-slate-300"
+                        className={`h-11 min-w-[2.75rem] cursor-pointer rounded transition-colors sm:h-9 ${
+                          on ? "bg-ok-solid" : "bg-slot hover:bg-slot-hover"
                         }`}
                       />
                     </td>
@@ -194,6 +202,11 @@ function AvailabilityGridImpl({ spec, selected, onChange }: Props) {
           </tbody>
         </table>
       </div>
+      {days.length > 4 && (
+        <p className="mt-2 text-center text-xs text-ink-faint sm:hidden">
+          Swipe the grid sideways for the rest of the days.
+        </p>
+      )}
     </div>
   );
 }

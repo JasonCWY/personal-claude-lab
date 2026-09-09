@@ -47,7 +47,7 @@ export function BookableBlocks({
 
   if (blocks.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+      <p className="rounded-xl border border-dashed border-line-strong p-6 text-center text-sm text-ink-soft">
         No {byDate ? "run of dates" : "window"} yet where the same {minPlayersShort} people are
         free right through. Chase whoever has not answered, or widen the{" "}
         {byDate ? "date range" : "polled hours"}.
@@ -119,11 +119,11 @@ export function BookableBlocks({
         const { weekday, dayOfMonth, month } = formatDayHeader(day);
         return (
           <div key={day}>
-            <h4 className="mb-2 text-sm font-semibold text-slate-700">
+            <h4 className="mb-2 text-sm font-semibold text-ink-muted">
               {weekday} {dayOfMonth} {month}
             </h4>
 
-            <div className="relative mb-3 h-7 rounded-lg bg-slate-100">
+            <div className="relative mb-3 h-7 rounded-lg bg-surface-2">
               {dayBlocks.map((b, i) => {
                 const { left, width } = bar(b);
                 return (
@@ -131,8 +131,10 @@ export function BookableBlocks({
                     key={i}
                     style={{ left, width }}
                     title={`${formatSpan(b.start, (b.end.getTime() - b.start.getTime()) / 60000)} — ${b.headcount} free`}
-                    className={`absolute top-1 flex h-5 items-center justify-center rounded text-[0.65rem] font-medium text-white ${
-                      b.tier === "full" ? "bg-emerald-600" : "bg-amber-500"
+                    className={`absolute top-1 flex h-5 items-center justify-center rounded text-[0.65rem] font-medium ${
+                      b.tier === "full"
+                        ? "bg-ok-solid text-ok-solid-fg"
+                        : "bg-warn-solid text-warn-solid-fg"
                     }`}
                   >
                     {b.headcount}
@@ -185,7 +187,7 @@ function BlockRow({
   const latitude = block.starts.length > 1;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">
           {byDate
@@ -201,7 +203,7 @@ function BlockRow({
         )}
       </div>
 
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-soft">
         {byDate ? "Take " : "Book "}
         {byDate ? formatDays(block.durationMinutes) : formatDuration(block.durationMinutes)}
         {latitude
@@ -209,7 +211,7 @@ function BlockRow({
           : " — only one start fits"}
       </p>
 
-      <p className="mt-2 text-sm text-slate-600">
+      <p className="mt-2 text-sm text-ink-muted">
         {block.people.map((id) => names.get(id) ?? id).join(", ")}
       </p>
 
@@ -220,7 +222,7 @@ function BlockRow({
         <input type="hidden" name="people" value={block.people.join(",")} />
 
         <div className="min-w-[11rem]">
-          <label className="mb-1 block text-xs text-slate-500">Start at</label>
+          <label className="mb-1 block text-xs text-ink-soft">Start at</label>
           <Select name="confirmed_start_at" defaultValue={block.starts[0].toISOString()}>
             {block.starts.map((s) => (
               <option key={s.toISOString()} value={s.toISOString()}>
@@ -231,7 +233,7 @@ function BlockRow({
         </div>
 
         <div className="min-w-[11rem]">
-          <label className="mb-1 block text-xs text-slate-500">Venue</label>
+          <label className="mb-1 block text-xs text-ink-soft">Venue</label>
           <Select name="venue_id" defaultValue={defaultVenueId ?? ""}>
             <option value="">No venue</option>
             {venues.map((v) => (

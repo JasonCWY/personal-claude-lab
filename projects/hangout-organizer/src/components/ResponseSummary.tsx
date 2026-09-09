@@ -45,7 +45,7 @@ export function ResponseSummary({
       <Column
         title="Voted"
         count={voted.length}
-        tone="emerald"
+        tone="ok"
         empty="Nobody yet."
         people={voted.map((p) => {
           const n = slotsByPerson.get(p.id) ?? 0;
@@ -63,7 +63,7 @@ export function ResponseSummary({
       <Column
         title="Can't make it"
         count={declined.length}
-        tone="slate"
+        tone="neutral"
         empty="Nobody has ruled themselves out."
         people={declined.map((p) => ({
           id: p.id,
@@ -76,7 +76,7 @@ export function ResponseSummary({
       <Column
         title="Not answered"
         count={waiting.length}
-        tone="amber"
+        tone="warn"
         empty="Everyone has replied."
         people={waiting.map((p) => ({
           id: p.id,
@@ -99,7 +99,7 @@ function Column({
 }: {
   title: string;
   count: number;
-  tone: "emerald" | "slate" | "amber";
+  tone: "ok" | "neutral" | "warn";
   empty: string;
   people: {
     id: string;
@@ -110,14 +110,14 @@ function Column({
   }[];
 }) {
   const heading = {
-    emerald: "text-emerald-800",
-    slate: "text-slate-700",
-    amber: "text-amber-800",
+    ok: "text-ok-fg",
+    neutral: "text-ink-muted",
+    warn: "text-warn-fg",
   }[tone];
   const rule = {
-    emerald: "border-emerald-200 bg-emerald-50/40",
-    slate: "border-slate-200 bg-slate-50",
-    amber: "border-amber-200 bg-amber-50/40",
+    ok: "border-ok-border bg-ok-bg",
+    neutral: "border-line bg-surface-2",
+    warn: "border-warn-border bg-warn-bg",
   }[tone];
 
   return (
@@ -126,17 +126,17 @@ function Column({
         {title} · {count}
       </h3>
       {people.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-400">{empty}</p>
+        <p className="mt-2 text-xs text-ink-faint">{empty}</p>
       ) : (
         <ul className="mt-2 space-y-1.5">
           {people.map((p) => (
             <li key={p.id} className="text-sm leading-tight">
               <span className="flex flex-wrap items-baseline gap-x-2">
-                <span className={p.muted ? "text-slate-500" : "text-slate-800"}>{p.name}</span>
+                <span className={p.muted ? "text-ink-soft" : "text-ink"}>{p.name}</span>
                 {p.note && (
                   <span
                     className={`text-xs tabular-nums ${
-                      p.muted ? "text-amber-700" : "text-slate-500"
+                      p.muted ? "text-warn-fg" : "text-ink-soft"
                     }`}
                   >
                     {p.note}
@@ -144,7 +144,7 @@ function Column({
                 )}
               </span>
               {p.comment && (
-                <span className="mt-0.5 block text-xs italic text-slate-500">
+                <span className="mt-0.5 block text-xs italic text-ink-soft">
                   &ldquo;{p.comment}&rdquo;
                 </span>
               )}

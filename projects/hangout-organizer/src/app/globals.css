@@ -2,10 +2,148 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: light;
-}
+/*
+ * The two themes, as RGB channel triples. Nothing else in the app names a
+ * palette step — see tailwind.config.ts for why.
+ *
+ * Dark is not an inversion of light. Pure white on pure black glares, so the
+ * dark surfaces are a cool near-navy and the brightest text stops well short of
+ * #fff. The accent flips completely: the primary button is near-black on light
+ * and near-white on dark, which is the one pairing that stays unmistakably "the
+ * button you press" in both.
+ *
+ * The filled greens and ambers flip their FOREGROUND rather than their fill,
+ * for contrast rather than taste: a mid-emerald dark enough to carry white text
+ * on a white page is too dark to read as "selected" on a dark one, so dark mode
+ * brightens the fill and darkens the text on it. Every pair below clears WCAG
+ * AA (4.5:1 for text, 3:1 for the incidental ones) in BOTH themes — the
+ * hot end of the heat ramp fails it in one theme if you simply invert it.
+ */
+@layer base {
+  :root {
+    color-scheme: light;
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+    --canvas: 248 250 252;
+    --surface: 255 255 255;
+    --surface-2: 246 248 251;
+    --surface-3: 237 241 246;
+
+    --ink: 15 23 42;
+    --ink-muted: 71 85 105;
+    --ink-soft: 85 100 122;
+    --ink-faint: 122 135 155;
+
+    --line: 226 232 240;
+    --line-strong: 203 213 225;
+
+    --accent: 15 23 42;
+    --accent-fg: 255 255 255;
+    --accent-hover: 51 65 85;
+
+    --ok-bg: 236 253 245;
+    --ok-border: 167 243 208;
+    --ok-fg: 4 108 78;
+    --ok-solid: 4 124 88;
+    --ok-solid-fg: 255 255 255;
+
+    --warn-bg: 255 251 235;
+    --warn-border: 253 211 77;
+    --warn-fg: 146 64 14;
+    --warn-solid: 245 158 11;
+    --warn-solid-fg: 59 26 3;
+
+    --bad-bg: 255 241 242;
+    --bad-border: 254 205 211;
+    --bad-fg: 159 18 57;
+
+    --info-bg: 224 231 255;
+    --info-bg-hover: 199 210 254;
+    --info-fg: 49 46 129;
+
+    --slot: 226 232 240;
+    --slot-hover: 203 213 225;
+
+    --heat-1: 209 250 229;
+    --heat-2: 167 243 208;
+    --heat-3: 4 135 95;
+    --heat-4: 4 105 76;
+    --heat-fg: 255 255 255;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    --canvas: 9 13 22;
+    --surface: 19 25 38;
+    --surface-2: 26 33 48;
+    --surface-3: 36 45 63;
+
+    --ink: 229 235 244;
+    --ink-muted: 168 179 197;
+    --ink-soft: 132 145 165;
+    --ink-faint: 105 118 138;
+
+    --line: 36 45 63;
+    --line-strong: 53 64 85;
+
+    --accent: 229 235 244;
+    --accent-fg: 12 17 27;
+    --accent-hover: 255 255 255;
+
+    --ok-bg: 6 40 31;
+    --ok-border: 17 82 61;
+    --ok-fg: 110 231 183;
+    --ok-solid: 16 163 116;
+    --ok-solid-fg: 3 33 25;
+
+    --warn-bg: 43 31 8;
+    --warn-border: 97 71 18;
+    --warn-fg: 252 191 73;
+    --warn-solid: 202 128 8;
+    --warn-solid-fg: 59 26 3;
+
+    --bad-bg: 46 15 22;
+    --bad-border: 100 32 46;
+    --bad-fg: 253 164 175;
+
+    --info-bg: 39 37 92;
+    --info-bg-hover: 52 49 120;
+    --info-fg: 199 210 254;
+
+    --slot: 43 54 74;
+    --slot-hover: 58 72 96;
+
+    --heat-1: 11 58 45;
+    --heat-2: 17 88 66;
+    --heat-3: 32 155 112;
+    --heat-4: 42 181 128;
+    --heat-fg: 2 26 20;
+  }
+
+  body {
+    @apply bg-canvas text-ink antialiased;
+    /* iOS paints a grey flash over every tapped button by default; the app has
+       its own :active and hover states and does not need a second one. */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /*
+   * Long grids scroll sideways inside the page. Without this, flicking one to
+   * its end on iOS hands the gesture to the page and starts a rubber-band
+   * bounce, which reads as the grid coming loose.
+   */
+  .scroll-x {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /*
+   * A visible focus ring, but only for keyboard users — the grid cells are
+   * focusable so they can be toggled without a pointer, and a ring appearing
+   * under every tap would be noise.
+   */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/60 ring-offset-2 ring-offset-canvas;
+  }
 }

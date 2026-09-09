@@ -48,28 +48,30 @@ export function ShareMessage({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded-lg bg-slate-100 px-3 py-2 text-xs">
+      {/* Stacked on a phone: side by side, the URL got about 120px and the
+          host could not see which link they were about to copy. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <code className="scroll-x flex-1 whitespace-nowrap rounded-lg bg-surface-2 px-3 py-2 text-xs text-ink-muted">
           {url}
         </code>
         <button
           type="button"
           onClick={() => copy(url, "link")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+          className="min-h-tap shrink-0 rounded-lg border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium transition hover:bg-surface-2 active:scale-[0.98]"
         >
           Copy link
         </button>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div className="rounded-xl border border-line bg-surface-2 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">
             Message preview
           </span>
           <button
             type="button"
             onClick={() => setEditing((e) => !e)}
-            className="text-xs text-slate-600 underline"
+            className="rounded-lg px-2 py-1.5 text-xs text-ink-muted underline transition-colors hover:text-ink"
           >
             {editing ? "Done editing" : "Edit"}
           </button>
@@ -80,12 +82,12 @@ export function ShareMessage({
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={Math.min(14, message.split("\n").length + 2)}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs"
+            className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 font-mono text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
           />
         ) : (
           // Rendered the way WhatsApp would show it, so the host sees the real
           // shape of what they are pasting rather than a form field.
-          <pre className="max-w-full whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-sm text-slate-800">
+          <pre className="max-w-full whitespace-pre-wrap break-words rounded-lg bg-surface p-3 text-sm text-ink">
             {full}
           </pre>
         )}
@@ -95,14 +97,14 @@ export function ShareMessage({
             href={whatsappHref}
             target="_blank"
             rel="noreferrer"
-            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            className="inline-flex min-h-tap flex-1 items-center justify-center rounded-lg bg-ok-solid px-3.5 py-2 text-sm font-medium text-ok-solid-fg transition hover:brightness-110 active:scale-[0.98] sm:flex-none"
           >
             Open in WhatsApp
           </a>
           <button
             type="button"
             onClick={() => copy(full, "message")}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+            className="inline-flex min-h-tap flex-1 items-center justify-center rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover active:scale-[0.98] sm:flex-none"
           >
             Copy message
           </button>
@@ -110,17 +112,17 @@ export function ShareMessage({
             <button
               type="button"
               onClick={() => setMessage(defaultMessage)}
-              className="text-xs text-slate-500 underline"
+              className="rounded-lg px-2 py-1.5 text-xs text-ink-soft underline transition-colors hover:text-ink"
             >
               Reset to generated text
             </button>
           )}
-          <span className="text-xs text-slate-500">{full.length} characters</span>
+          <span className="text-xs text-ink-soft">{full.length} characters</span>
         </div>
       </div>
 
       {isLocal && (
-        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+        <p className="rounded-lg border border-warn-border bg-warn-bg p-3 text-xs text-warn-fg">
           This link points at <code>localhost</code>, so it only works on this machine and WhatsApp
           will not make it tappable. Deploy to Vercel and set <code>NEXT_PUBLIC_SITE_URL</code>
           {" "}to the public URL before sending it to anyone.
@@ -128,9 +130,9 @@ export function ShareMessage({
       )}
 
       {copied === "failed" ? (
-        <p className="text-xs text-rose-700">Could not access the clipboard — copy it manually.</p>
+        <p className="text-xs text-bad-fg">Could not access the clipboard — copy it manually.</p>
       ) : copied ? (
-        <p className="text-xs text-emerald-700">Copied the {copied}.</p>
+        <p className="text-xs text-ok-fg">Copied the {copied}.</p>
       ) : null}
     </div>
   );

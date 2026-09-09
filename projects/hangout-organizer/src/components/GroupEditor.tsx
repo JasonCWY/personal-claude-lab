@@ -28,7 +28,7 @@ export function GroupEditor({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-sm text-slate-600 underline"
+        className="min-h-tap rounded-lg py-1 text-sm text-ink-muted underline transition-colors hover:text-ink"
       >
         Edit members
       </button>
@@ -44,7 +44,7 @@ export function GroupEditor({
           name="name"
           required
           placeholder="Group name, e.g. Badminton regulars"
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:max-w-sm"
+          className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 sm:max-w-sm"
         />
       )}
       {group && <input type="hidden" name="name" value={group.name} />}
@@ -55,12 +55,13 @@ export function GroupEditor({
           return (
             <label
               key={p.id}
-              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                on ? "border-slate-900 bg-slate-50" : "border-slate-300 bg-white"
+              className={`flex min-h-tap cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                on ? "border-accent bg-surface-2" : "border-line-strong bg-surface"
               }`}
             >
               <input
                 type="checkbox"
+                className="h-4 w-4 accent-ok-solid"
                 name="member_ids"
                 value={p.id}
                 checked={on}
@@ -82,16 +83,16 @@ export function GroupEditor({
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          className="inline-flex min-h-tap items-center rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover active:scale-[0.98]"
         >
           {group ? "Save members" : "Create group"}
         </button>
-        <span className="text-xs text-slate-500">{picked.size} selected</span>
+        <span className="text-xs text-ink-soft">{picked.size} selected</span>
         {group && (
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="text-xs text-slate-500 underline"
+            className="rounded-lg px-2 py-1.5 text-xs text-ink-soft underline transition-colors hover:text-ink"
           >
             Cancel
           </button>

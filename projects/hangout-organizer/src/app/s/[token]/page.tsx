@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { PollForm } from "@/components/PollForm";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { formatDateSpan, formatDays, formatDuration, formatSpan } from "@/lib/slots";
 import type {
   AvailabilityRow,
@@ -110,18 +111,28 @@ export default async function PublicPollPage({
   const booked = sessions.filter((s) => s.status === "confirmed" && s.confirmed_start_at);
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-6">
-      <h1 className="text-xl font-semibold tracking-tight">{poll.title}</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        {poll.poll_start_date} to {poll.poll_end_date}
-        {byDate ? "" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`}
-      </p>
+    <main className="mx-auto min-h-dvh max-w-2xl px-4 py-6">
+      {/*
+        The toggle is on the friend-facing pages too, not just the host's: these
+        are the links opened from a group chat late at night, and they are the
+        screens in this app most likely to be read in the dark.
+      */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight">{poll.title}</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            {poll.poll_start_date} to {poll.poll_end_date}
+            {byDate ? "" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`}
+          </p>
+        </div>
+        <ThemeToggle className="shrink-0" />
+      </div>
 
       {sessions.length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs text-slate-500">
+        <ul className="mt-3 space-y-1 text-xs text-ink-soft">
           {sessions.map((s) => (
             <li key={s.id}>
-              <span className="font-medium text-slate-700">{s.title}</span> — need{" "}
+              <span className="font-medium text-ink-muted">{s.title}</span> — need{" "}
               {s.min_players_full} for{" "}
               {byDate ? formatDays(s.full_duration_minutes) : formatDuration(s.full_duration_minutes)}
               , or {s.min_players_short} for{" "}
@@ -132,18 +143,18 @@ export default async function PublicPollPage({
           ))}
         </ul>
       )}
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-ink-soft">
         Answer once — it counts for everything listed above. All times Malaysia time.
       </p>
 
-      {poll.notes && <p className="mt-3 text-sm text-slate-700">{poll.notes}</p>}
+      {poll.notes && <p className="mt-3 text-sm text-ink-muted">{poll.notes}</p>}
 
-      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mt-6 rounded-xl border border-line bg-surface p-4 shadow-sm">
         {closed ? (
           <div>
             <h2 className="font-medium">This poll is closed.</h2>
             {booked.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-sm text-slate-700">
+              <ul className="mt-2 space-y-1 text-sm text-ink-muted">
                 {booked.map((s) => (
                   <li key={s.id}>
                     <strong>{s.title}</strong> —{" "}
@@ -160,7 +171,7 @@ export default async function PublicPollPage({
                 ))}
               </ul>
             ) : (
-              <p className="mt-2 text-sm text-slate-600">Ask the host for details.</p>
+              <p className="mt-2 text-sm text-ink-muted">Ask the host for details.</p>
             )}
           </div>
         ) : (

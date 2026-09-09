@@ -214,7 +214,7 @@ export default async function PollPage({
       {clashes.length > 0 && (
         <div
           role="alert"
-          className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-6 rounded-xl border border-warn-border bg-warn-bg p-4 text-sm text-warn-fg"
         >
           <p className="font-semibold">These bookings overlap, with the same people in both:</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -236,7 +236,10 @@ export default async function PollPage({
       <Card className="mb-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-medium">
-            Who is free — {responses.length} of {roster.length} answered
+            Who is free{" "}
+            <span className="font-normal text-ink-soft">
+              — {responses.length} of {roster.length} answered
+            </span>
           </h2>
         </div>
 
@@ -301,7 +304,7 @@ export default async function PollPage({
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-medium">{session.title}</h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-soft">
                   {sport?.name ?? "Trip"} · {session.min_players_full} →{" "}
                   {byDate
                     ? formatDays(session.full_duration_minutes)
@@ -320,12 +323,12 @@ export default async function PollPage({
             {sessions.length > 1 && (optedOutNames.length > 0 || answeredBefore.length > 0) && (
               <div className="mb-3 space-y-1 text-xs">
                 {optedOutNames.length > 0 && (
-                  <p className="text-slate-500">
+                  <p className="text-ink-soft">
                     Not up for this: {optedOutNames.join(", ")} — their times are excluded here.
                   </p>
                 )}
                 {answeredBefore.length > 0 && (
-                  <p className="text-amber-700">
+                  <p className="text-warn-fg">
                     {answeredBefore.join(", ")} answered before this activity was added, so they
                     are counted without having said yes to it.
                   </p>
@@ -334,8 +337,8 @@ export default async function PollPage({
             )}
 
             {session.status === "confirmed" && session.confirmed_start_at ? (
-              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4">
-                <p className="font-medium text-emerald-900">
+              <div className="rounded-xl border border-ok-border bg-ok-bg p-4">
+                <p className="font-medium text-ok-fg">
                   Booked:{" "}
                   {byDate
                     ? formatDateSpan(
@@ -347,13 +350,13 @@ export default async function PollPage({
                         session.confirmed_duration_minutes ?? 0,
                       )}
                 </p>
-                <p className="mt-1 text-sm text-emerald-800">
+                <p className="mt-1 text-sm text-ok-fg">
                   {(attendeesBySession.get(session.id) ?? [])
                     .map((pid) => names.get(pid) ?? pid)
                     .join(", ")}
                 </p>
                 {venue && (
-                  <p className="mt-1 text-sm text-emerald-800">
+                  <p className="mt-1 text-sm text-ok-fg">
                     {venue.name}
                     {venue.booking_url && (
                       <>
@@ -373,7 +376,7 @@ export default async function PollPage({
                 <form action={unconfirmSession} className="mt-3">
                   <input type="hidden" name="id" value={session.id} />
                   <input type="hidden" name="poll_id" value={poll.id} />
-                  <button type="submit" className="text-sm text-emerald-900 underline">
+                  <button type="submit" className="min-h-tap rounded-lg px-1 text-sm text-ok-fg underline transition-colors hover:brightness-110">
                     Unconfirm
                   </button>
                 </form>
@@ -411,13 +414,13 @@ export default async function PollPage({
           </div>
           <Button type="submit">Add</Button>
         </form>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-ink-soft">
           It is scored against the answers already collected — nobody fills anything in again.
         </p>
       </Card>
       )}
 
-      <div className="flex flex-wrap gap-4">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <form action={setPollStatus}>
           <input type="hidden" name="id" value={poll.id} />
           <input
@@ -425,20 +428,20 @@ export default async function PollPage({
             name="status"
             value={poll.status === "polling" ? "closed" : "polling"}
           />
-          <button type="submit" className="text-sm text-slate-600 underline">
+          <button type="submit" className="min-h-tap rounded-lg px-1 text-sm text-ink-muted underline transition-colors hover:text-ink">
             {poll.status === "polling" ? "Close the poll" : "Reopen the poll"}
           </button>
         </form>
         <form action={duplicatePoll}>
           <input type="hidden" name="id" value={poll.id} />
           <input type="hidden" name="shift_days" value="7" />
-          <button type="submit" className="text-sm text-slate-600 underline">
+          <button type="submit" className="min-h-tap rounded-lg px-1 text-sm text-ink-muted underline transition-colors hover:text-ink">
             Duplicate for next week
           </button>
         </form>
         <form action={deletePoll}>
           <input type="hidden" name="id" value={poll.id} />
-          <button type="submit" className="text-sm text-rose-700 underline">
+          <button type="submit" className="min-h-tap rounded-lg px-1 text-sm text-bad-fg underline transition-colors hover:brightness-110">
             Delete poll
           </button>
         </form>

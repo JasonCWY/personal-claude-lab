@@ -69,12 +69,20 @@ export default async function CalendarPage({
         title="Calendar"
         subtitle="Confirmed sessions and dated events, Malaysia time."
         action={
-          <div className="flex items-center gap-2 text-sm">
-            <Link href={`/calendar?m=${prev}`} className="rounded-lg border border-slate-300 bg-white px-3 py-2">
+          <div className="flex w-full items-center justify-between gap-2 text-sm sm:w-auto">
+            <Link
+              href={`/calendar?m=${prev}`}
+              aria-label="Previous month"
+              className="flex min-h-tap w-11 items-center justify-center rounded-lg border border-line-strong bg-surface transition hover:bg-surface-2 active:scale-95"
+            >
               ←
             </Link>
             <span className="min-w-[9rem] text-center font-medium">{monthName}</span>
-            <Link href={`/calendar?m=${next}`} className="rounded-lg border border-slate-300 bg-white px-3 py-2">
+            <Link
+              href={`/calendar?m=${next}`}
+              aria-label="Next month"
+              className="flex min-h-tap w-11 items-center justify-center rounded-lg border border-line-strong bg-surface transition hover:bg-surface-2 active:scale-95"
+            >
               →
             </Link>
           </div>
@@ -91,7 +99,7 @@ export default async function CalendarPage({
         </div>
       )}
 
-      <p className="mt-4 text-xs text-slate-500">
+      <p className="mt-4 text-xs text-ink-soft">
         Green is a confirmed session, indigo is an event. Polls still open do not appear here until
         you confirm a slot.
       </p>

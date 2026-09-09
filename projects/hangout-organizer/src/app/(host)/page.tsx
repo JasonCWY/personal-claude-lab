@@ -56,7 +56,7 @@ export default async function Dashboard() {
       />
 
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
           Polls open
         </h2>
         {polling.length === 0 ? (
@@ -66,17 +66,17 @@ export default async function Dashboard() {
             {polling.map((poll) => {
               const activities = sessionsByPoll.get(poll.id) ?? [];
               return (
-                <Link key={poll.id} href={`/polls/${poll.id}`}>
-                  <Card className="transition hover:border-slate-400">
+                <Link key={poll.id} href={`/polls/${poll.id}`} className="block">
+                  <Card className="h-full transition hover:border-accent active:scale-[0.99]">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{poll.title}</span>
                       <Badge tone="amber">polling</Badge>
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-sm text-ink-muted">
                       {poll.poll_start_date} to {poll.poll_end_date} ·{" "}
                       {poll.day_start_time.slice(0, 5)}–{poll.day_end_time.slice(0, 5)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 text-xs text-ink-soft">
                       {activities.length === 0
                         ? "No activities yet"
                         : activities.map((a) => a.title).join(", ")}
@@ -90,7 +90,7 @@ export default async function Dashboard() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
           Confirmed sessions
         </h2>
         {upcoming.length === 0 ? (
@@ -98,19 +98,19 @@ export default async function Dashboard() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {upcoming.map((s) => (
-              <Link key={s.id} href={`/polls/${s.poll_id}`}>
-                <Card className="transition hover:border-slate-400">
+              <Link key={s.id} href={`/polls/${s.poll_id}`} className="block">
+                <Card className="h-full transition hover:border-accent active:scale-[0.99]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium">{s.title}</span>
                     <Badge tone="green">confirmed</Badge>
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <p className="mt-1 text-sm text-ink-muted">
                     {formatSpan(
                       new Date(s.confirmed_start_at!),
                       s.confirmed_duration_minutes ?? 0,
                     )}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-ink-soft">
                     {s.sport_id ? sportName.get(s.sport_id) : "Trip"}
                     {pollById.get(s.poll_id) ? ` · ${pollById.get(s.poll_id)!.title}` : ""}
                   </p>
@@ -122,7 +122,7 @@ export default async function Dashboard() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
           Events
         </h2>
         {liveEvents.length === 0 ? (
@@ -130,17 +130,17 @@ export default async function Dashboard() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {liveEvents.map((e) => (
-              <Link key={e.id} href={`/events/${e.id}`}>
-                <Card className="transition hover:border-slate-400">
+              <Link key={e.id} href={`/events/${e.id}`} className="block">
+                <Card className="h-full transition hover:border-accent active:scale-[0.99]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium">{e.title}</span>
                     <Badge>{e.event_type}</Badge>
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <p className="mt-1 text-sm text-ink-muted">
                     {e.event_date ?? "No date yet"}
                     {e.location ? ` · ${e.location}` : ""}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-ink-soft">
                     {openTasks.get(e.id) ?? 0} task{(openTasks.get(e.id) ?? 0) === 1 ? "" : "s"} left
                   </p>
                 </Card>

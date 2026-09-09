@@ -60,17 +60,17 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           url={shareUrl}
           defaultMessage={`${event.title} — here is the checklist. Tick off anything you have done:`}
         />
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-ink-soft">
           Anyone with this link can tick tasks off. They cannot add, edit or delete them.
         </p>
       </Card>
 
       <section className="mb-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
             Checklist
           </h2>
-          <span className="text-sm text-slate-500">
+          <span className="text-sm text-ink-soft">
             {done} / {tasks.length} done
           </span>
         </div>
@@ -80,27 +80,50 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         ) : (
           <div className="space-y-2">
             {tasks.map((task) => (
-              <Card key={task.id} className="flex flex-wrap items-center gap-3">
-                <form action={toggleTask} className="flex items-center">
-                  <input type="hidden" name="id" value={task.id} />
-                  <input type="hidden" name="event_id" value={event.id} />
-                  <input type="hidden" name="is_done" value={String(!task.is_done)} />
-                  <button
-                    type="submit"
-                    aria-label={task.is_done ? "Mark not done" : "Mark done"}
-                    className={`h-5 w-5 rounded border ${
-                      task.is_done
-                        ? "border-emerald-600 bg-emerald-600"
-                        : "border-slate-400 bg-white"
-                    }`}
-                  />
-                </form>
+              /*
+                Deliberately two rows rather than one wrapping one. All five
+                controls in a single flex row wrapped at whatever point the task
+                title happened to run out on a phone, so the assignee dropdown
+                could end up on the same line as the tick box on one card and
+                below the title on the next. Splitting "what the task is" from
+                "how it is set up" makes every card break in the same place.
+              */
+              <Card key={task.id} className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <form action={toggleTask} className="flex">
+                    <input type="hidden" name="id" value={task.id} />
+                    <input type="hidden" name="event_id" value={event.id} />
+                    <input type="hidden" name="is_done" value={String(!task.is_done)} />
+                    {/* The visible box stays 20px; the target around it is 44. */}
+                    <button
+                      type="submit"
+                      aria-label={task.is_done ? "Mark not done" : "Mark done"}
+                      className="-m-2 flex h-11 w-11 items-center justify-center"
+                    >
+                      <span
+                        className={`h-5 w-5 rounded border transition-colors ${
+                          task.is_done
+                            ? "border-ok-solid bg-ok-solid"
+                            : "border-line-strong bg-surface"
+                        }`}
+                      />
+                    </button>
+                  </form>
 
-                <div className="min-w-[10rem] flex-1">
-                  <p className={task.is_done ? "text-slate-400 line-through" : "font-medium"}>
-                    {task.title}
-                  </p>
-                  {task.notes && <p className="text-xs text-slate-500">{task.notes}</p>}
+                  <div className="min-w-0 flex-1">
+                    <p className={task.is_done ? "text-ink-faint line-through" : "font-medium"}>
+                      {task.title}
+                    </p>
+                    {task.notes && <p className="text-xs text-ink-soft">{task.notes}</p>}
+                  </div>
+
+                  <form action={deleteTask} className="shrink-0">
+                    <input type="hidden" name="id" value={task.id} />
+                    <input type="hidden" name="event_id" value={event.id} />
+                    <Button type="submit" variant="danger">
+                      Delete
+                    </Button>
+                  </form>
                 </div>
 
                 <form action={updateTask} className="flex flex-wrap items-center gap-2">
@@ -109,7 +132,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                   <select
                     name="assignee_person_id"
                     defaultValue={task.assignee_person_id ?? ""}
-                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                    className="min-h-tap flex-1 rounded-lg border border-line-strong bg-surface px-2 py-1 text-base text-ink sm:flex-none sm:text-sm"
                   >
                     <option value="">Unassigned</option>
                     {roster.map((p) => (
@@ -122,18 +145,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                     type="date"
                     name="due_date"
                     defaultValue={task.due_date ?? ""}
-                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                    className="min-h-tap flex-1 rounded-lg border border-line-strong bg-surface px-2 py-1 text-base text-ink sm:flex-none sm:text-sm"
                   />
                   <Button type="submit" variant="secondary">
                     Save
-                  </Button>
-                </form>
-
-                <form action={deleteTask}>
-                  <input type="hidden" name="id" value={task.id} />
-                  <input type="hidden" name="event_id" value={event.id} />
-                  <Button type="submit" variant="danger">
-                    Delete
                   </Button>
                 </form>
               </Card>

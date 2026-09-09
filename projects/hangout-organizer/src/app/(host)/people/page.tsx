@@ -48,7 +48,7 @@ export default async function PeoplePage() {
         <div className="space-y-2">
           {people.map((person) => (
             <Card key={person.id} className="flex flex-wrap items-center gap-3">
-              <span className={person.is_active ? "font-medium" : "text-slate-400 line-through"}>
+              <span className={person.is_active ? "font-medium" : "text-ink-faint line-through"}>
                 {person.display_name}
               </span>
               <div className="ml-auto flex gap-2">
@@ -71,16 +71,16 @@ export default async function PeoplePage() {
         </div>
       )}
 
-      <p className="mt-6 text-xs text-slate-500">
+      <p className="mt-6 text-xs text-ink-soft">
         Setting someone inactive hides them from new polls but keeps their past answers. Deleting
         removes their availability and attendance history too.
       </p>
 
       <section className="mt-10">
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-ink-soft">
           Groups
         </h2>
-        <p className="mb-3 text-sm text-slate-600">
+        <p className="mb-3 text-sm text-ink-muted">
           Address a poll to a group instead of the whole roster. The members are copied onto the
           poll when you create it, so editing a group later never changes who a running poll was
           sent to.
@@ -102,7 +102,7 @@ export default async function PeoplePage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <span className="font-medium">{group.name}</span>
-                      <span className="ml-2 text-xs text-slate-500">
+                      <span className="ml-2 text-xs text-ink-soft">
                         {members.length} {members.length === 1 ? "person" : "people"}
                       </span>
                     </div>
@@ -113,7 +113,7 @@ export default async function PeoplePage() {
                       </Button>
                     </form>
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <p className="mt-1 text-sm text-ink-muted">
                     {members.length
                       ? members.map((id) => nameById.get(id) ?? id).join(", ")
                       : "Nobody in this group yet."}

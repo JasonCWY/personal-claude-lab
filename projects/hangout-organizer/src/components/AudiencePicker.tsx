@@ -36,7 +36,7 @@ export function AudiencePicker({
 
   return (
     <div className="sm:col-span-2">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-soft">
         Who is being asked
       </h2>
 
@@ -54,10 +54,10 @@ export function AudiencePicker({
             key={value}
             type="button"
             onClick={() => setMode(value)}
-            className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+            className={`min-h-tap rounded-lg border px-3 py-1.5 text-sm font-medium transition active:scale-[0.98] ${
               mode === value
-                ? "border-slate-900 bg-slate-900 text-white"
-                : "border-slate-300 bg-white hover:bg-slate-50"
+                ? "border-accent bg-accent text-accent-fg"
+                : "border-line-strong bg-surface hover:bg-surface-2"
             }`}
           >
             {label}
@@ -68,7 +68,7 @@ export function AudiencePicker({
       {mode === "group" && (
         <div>
           {groups.length === 0 ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-ink-soft">
               No groups yet — create one on the Roster page, or pick people individually.
             </p>
           ) : (
@@ -76,7 +76,7 @@ export function AudiencePicker({
               name="group_id"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:max-w-xs"
+              className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 sm:max-w-xs"
             >
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
@@ -95,12 +95,13 @@ export function AudiencePicker({
             return (
               <label
                 key={p.id}
-                className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                  on ? "border-slate-900 bg-slate-50" : "border-slate-300 bg-white"
+                className={`flex min-h-tap cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                  on ? "border-accent bg-surface-2" : "border-line-strong bg-surface"
                 }`}
               >
                 <input
                   type="checkbox"
+                  className="h-4 w-4 accent-ok-solid"
                   name="person_ids"
                   value={p.id}
                   checked={on}
@@ -120,7 +121,7 @@ export function AudiencePicker({
         </div>
       )}
 
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-ink-soft">
         {resolved.length === 0
           ? "Nobody selected yet."
           : `${resolved.length} ${resolved.length === 1 ? "person" : "people"}: ${resolved
