@@ -10,13 +10,13 @@ import {
 import { Badge, Button, Card, Empty, ErrorBanner, PageHeader, Select } from "@/components/ui";
 import { ShareMessage } from "@/components/ShareMessage";
 import { HeatmapGrid } from "@/components/HeatmapGrid";
+import { ResponseSummary } from "@/components/ResponseSummary";
 import { BookableBlocks } from "@/components/BookableBlocks";
 import {
   computeCandidates,
   computeSlotCounts,
   groupCandidates,
   overlappingPeople,
-  pendingResponders,
 } from "@/lib/quorum";
 import { formatDateSpan, formatDays, formatDuration, formatSpan } from "@/lib/slots";
 import { SITE_URL } from "@/lib/env";
@@ -125,7 +125,6 @@ export default async function PollPage({
     set.add(row.person_id);
     optOutsBySession.set(row.session_id, set);
   }
-  const pending = pendingResponders(roster, responses.map((r) => r.person_id));
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
 
   // A decline is an answer, so these people are not in `pending` — the host has
@@ -133,11 +132,15 @@ export default async function PollPage({
   // availability, so without naming them here the host sees "6 of 8 answered"
   // over a thin heatmap and cannot tell whether the missing two are a quiet no
   // or a poll that simply has not landed yet.
-  const declinedNames = responses
-    .filter((r) => r.declined)
-    .map((r) => names.get(r.person_id) ?? r.person_id)
-    .sort();
   const declinedIds = new Set(responses.filter((r) => r.declined).map((r) => r.person_id));
+
+  // How many slots each person marked. "Answered" is not one thing: two slots
+  // and twenty are both answers, and the gap between them is most of why a
+  // window fails to reach quorum, so the summary shows the number.
+  const slotsByPerson = new Map<string, number>();
+  for (const row of availability) {
+    slotsByPerson.set(row.person_id, (slotsByPerson.get(row.person_id) ?? 0) + 1);
+  }
 
   const byDate = poll.granularity === "date";
 
@@ -234,36 +237,24 @@ export default async function PollPage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-medium">
             Who is free — {responses.length} of {roster.length} answered
-            {declinedNames.length > 0 && `, ${declinedNames.length} can't make it`}
           </h2>
-          {pending.length > 0 && (
-            <p className="text-sm text-slate-500">
-              Waiting on {pending.map((p) => p.display_name).join(", ")}
-            </p>
-          )}
         </div>
-        {declinedNames.length > 0 && (
-          <p className="mb-3 text-sm text-slate-500">
-            Not free for any of this window: {declinedNames.join(", ")} — they have answered, so
-            there is nothing to chase.
-          </p>
-        )}
+
+        <ResponseSummary
+          roster={roster}
+          responses={responses}
+          slotsByPerson={slotsByPerson}
+          byDate={byDate}
+        />
+
         {entries.length === 0 ? (
-          <Empty>Nobody has answered yet. Paste the link into the group chat.</Empty>
+          <Empty>
+            {responses.length === 0
+              ? "Nobody has answered yet. Paste the link into the group chat."
+              : "Everyone who has answered said they cannot make this window. Widen the dates or the hours."}
+          </Empty>
         ) : (
           <HeatmapGrid spec={spec} slotCounts={slotCounts} roster={roster} />
-        )}
-        {responses.some((r) => r.comment) && (
-          <ul className="mt-3 space-y-1 text-sm text-slate-600">
-            {responses
-              .filter((r) => r.comment)
-              .map((r) => (
-                <li key={r.person_id}>
-                  {names.get(r.person_id) ?? "Unknown"}
-                  <span className="text-slate-500"> — {r.comment}</span>
-                </li>
-              ))}
-          </ul>
         )}
       </Card>
 

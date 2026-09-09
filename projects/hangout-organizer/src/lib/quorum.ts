@@ -163,6 +163,46 @@ export function pendingResponders<T extends { id: string }>(
   return roster.filter((p) => !responded.has(p.id));
 }
 
+export interface ResponderGroups<T> {
+  /** Answered with times. */
+  voted: T[];
+  /** Answered "none of these work". */
+  declined: T[];
+  /** Has not answered at all. */
+  waiting: T[];
+}
+
+/**
+ * Split the invitee list into the three states a poll can leave someone in.
+ *
+ * The distinction that matters and is easy to lose: a decline is an ANSWER.
+ * Someone who said "none of these work" belongs with the people who replied,
+ * never with the people still being waited on — chasing them is the exact
+ * mistake this state was added to prevent. And they are not "voted" either,
+ * because they contribute no availability, so counting them there would
+ * overstate how much of the group has actually offered times.
+ *
+ * `declined` is read as optional so this behaves sanely against rows written
+ * before migration 008, where the column does not exist: absent means not
+ * declined, which is what every pre-existing response was.
+ *
+ * Roster order is preserved, so callers get whatever ordering they queried.
+ */
+export function groupResponders<T extends { id: string }>(
+  roster: T[],
+  responses: { person_id: string; declined?: boolean }[],
+): ResponderGroups<T> {
+  const byPerson = new Map(responses.map((r) => [r.person_id, r]));
+  return {
+    voted: roster.filter((p) => {
+      const r = byPerson.get(p.id);
+      return Boolean(r) && !r!.declined;
+    }),
+    declined: roster.filter((p) => Boolean(byPerson.get(p.id)?.declined)),
+    waiting: pendingResponders(roster, [...byPerson.keys()]),
+  };
+}
+
 /**
  * A run of overlapping candidates of the same tier, collapsed into one block.
  *

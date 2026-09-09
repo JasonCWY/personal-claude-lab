@@ -3,6 +3,7 @@ import {
   computeCandidates,
   computeSlotCounts,
   groupCandidates,
+  groupResponders,
   overlappingPeople,
   pendingResponders,
   type AvailabilityEntry,
@@ -183,6 +184,55 @@ describe("pendingResponders", () => {
   it("lists roster members who have not answered", () => {
     const roster = [{ id: "ali" }, { id: "ben" }, { id: "cara" }];
     expect(pendingResponders(roster, ["ben"])).toEqual([{ id: "ali" }, { id: "cara" }]);
+  });
+});
+
+describe("groupResponders", () => {
+  const roster = [{ id: "ali" }, { id: "ben" }, { id: "cara" }, { id: "dan" }];
+
+  it("splits the roster into voted, declined and waiting", () => {
+    const groups = groupResponders(roster, [
+      { person_id: "ali", declined: false },
+      { person_id: "ben", declined: true },
+      { person_id: "cara", declined: false },
+    ]);
+    expect(groups.voted).toEqual([{ id: "ali" }, { id: "cara" }]);
+    expect(groups.declined).toEqual([{ id: "ben" }]);
+    expect(groups.waiting).toEqual([{ id: "dan" }]);
+  });
+
+  it("counts a decline as an answer, never as someone still to chase", () => {
+    // The whole point of the declined state. If this regresses, the host goes
+    // back to chasing people who have already said no.
+    const groups = groupResponders(roster, [{ person_id: "ben", declined: true }]);
+    expect(groups.waiting.map((p) => p.id)).not.toContain("ben");
+    expect(groups.voted.map((p) => p.id)).not.toContain("ben");
+    expect(groups.declined).toEqual([{ id: "ben" }]);
+  });
+
+  it("treats a response with no `declined` field as a normal answer", () => {
+    // Rows written before migration 008 have no such column.
+    const groups = groupResponders(roster, [{ person_id: "ali" }]);
+    expect(groups.voted).toEqual([{ id: "ali" }]);
+    expect(groups.declined).toEqual([]);
+  });
+
+  it("puts every roster member in exactly one group", () => {
+    const groups = groupResponders(roster, [
+      { person_id: "ali", declined: false },
+      { person_id: "ben", declined: true },
+    ]);
+    const all = [...groups.voted, ...groups.declined, ...groups.waiting].map((p) => p.id);
+    expect(all.sort()).toEqual(["ali", "ben", "cara", "dan"]);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("ignores responses from people who are not on the roster", () => {
+    // A poll's invitee list is frozen at creation, so someone removed from the
+    // roster afterwards can still have a row. They must not appear anywhere.
+    const groups = groupResponders(roster, [{ person_id: "ghost", declined: true }]);
+    expect(groups.declined).toEqual([]);
+    expect(groups.waiting).toEqual(roster);
   });
 });
 

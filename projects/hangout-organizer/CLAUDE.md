@@ -89,6 +89,7 @@ src/
   components/
     AvailabilityGrid.tsx     Friend-facing drag grid. Touch is the primary target.
     HeatmapGrid.tsx          Host-facing per-slot density.
+    ResponseSummary.tsx      Voted / can't make it / not answered, side by side.
     BookableBlocks.tsx       Grouped windows as a per-day timeline + confirm form.
     AudiencePicker.tsx       Everyone / a group / hand-picked, with a live preview.
     ActivityPicker.tsx       Which sports this poll is trying to book.
