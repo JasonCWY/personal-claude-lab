@@ -21,7 +21,13 @@ import {
   groupCandidates,
   overlappingPeople,
 } from "@/lib/quorum";
-import { formatDateSpan, formatDays, formatDuration, formatSpan } from "@/lib/slots";
+import {
+  formatDateRange,
+  formatDateSpan,
+  formatDays,
+  formatDuration,
+  formatSpan,
+} from "@/lib/slots";
 import { SITE_URL } from "@/lib/env";
 import type {
   AvailabilityRow,
@@ -161,8 +167,8 @@ export default async function PollPage({
   const defaultMessage = [
     `${poll.title} — when are you free?`,
     byDate
-      ? `${poll.poll_start_date} to ${poll.poll_end_date}`
-      : `${poll.poll_start_date} to ${poll.poll_end_date}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
+      ? formatDateRange(poll.poll_start_date, poll.poll_end_date)
+      : `${formatDateRange(poll.poll_start_date, poll.poll_end_date)}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
     activityNames ? `Planning: ${activityNames}` : "",
     poll.notes ?? "",
     "",
@@ -206,7 +212,7 @@ export default async function PollPage({
     <>
       <PageHeader
         title={poll.title}
-        subtitle={`${poll.poll_start_date} to ${poll.poll_end_date}${
+        subtitle={`${formatDateRange(poll.poll_start_date, poll.poll_end_date)}${
           byDate ? " · whole dates" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`
         } · ${roster.length} asked${group ? ` (${group.name})` : ""}`}
         action={<Badge tone={poll.status === "polling" ? "amber" : "slate"}>{poll.status}</Badge>}

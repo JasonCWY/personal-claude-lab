@@ -2,7 +2,13 @@ import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { PollForm } from "@/components/PollForm";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { formatDateSpan, formatDays, formatDuration, formatSpan } from "@/lib/slots";
+import {
+  formatDateRange,
+  formatDateSpan,
+  formatDays,
+  formatDuration,
+  formatSpan,
+} from "@/lib/slots";
 import type {
   AvailabilityRow,
   GameSession,
@@ -121,7 +127,7 @@ export default async function PublicPollPage({
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">{poll.title}</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            {poll.poll_start_date} to {poll.poll_end_date}
+            {formatDateRange(poll.poll_start_date, poll.poll_end_date)}
             {byDate ? "" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`}
           </p>
         </div>

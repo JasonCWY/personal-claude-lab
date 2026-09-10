@@ -59,6 +59,42 @@ export function formatMoney(value: number | null | undefined, currency = CURRENC
   return `${currency === "MYR" ? "RM" : currency} ${Number(value).toFixed(2)}`;
 }
 
+/**
+ * "RM 50.00–70.00". Used where a price is a range rather than a number — an
+ * off-peak and a peak rate for the same court. Ordered defensively: a venue
+ * whose "peak" is cheaper than its base rate is a data-entry slip, not a reason
+ * to print a backwards range.
+ */
+export function formatMoneyRange(
+  a: number,
+  b: number,
+  currency = CURRENCY,
+): string | null {
+  const low = Math.min(a, b);
+  const high = Math.max(a, b);
+  if (low === high) return formatMoney(low, currency);
+  const highText = formatMoney(high, currency)!;
+  // The unit is already on the low end; repeating it reads as two prices.
+  return `${formatMoney(low, currency)}–${highText.slice(highText.indexOf(" ") + 1)}`;
+}
+
+/**
+ * The polled window as a person would say it: "Sun 13 Sep", or
+ * "Sat 12 – Sun 13 Sep" across days, or both months when it straddles one.
+ *
+ * A poll's dates used to print raw — "2026-09-13 to 2026-09-13" — which says
+ * the same date twice, in a format nobody speaks, on the screen and in the
+ * WhatsApp message that friends actually read.
+ */
+export function formatDateRange(startDate: string, endDate: string): string {
+  const a = formatDayHeader(startDate);
+  if (startDate === endDate) return `${a.weekday} ${a.dayOfMonth} ${a.month}`;
+  const b = formatDayHeader(endDate);
+  return a.month === b.month
+    ? `${a.weekday} ${a.dayOfMonth} – ${b.weekday} ${b.dayOfMonth} ${b.month}`
+    : `${a.weekday} ${a.dayOfMonth} ${a.month} – ${b.weekday} ${b.dayOfMonth} ${b.month}`;
+}
+
 export interface BookingWindow {
   /** KL date the platform starts accepting this booking, YYYY-MM-DD. */
   opensOn: string;

@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { bookingWindow, formatDayHeader, formatDuration, formatMoney } from "@/lib/slots";
+import {
+  bookingWindow,
+  formatDayHeader,
+  formatDuration,
+  formatMoney,
+  formatMoneyRange,
+} from "@/lib/slots";
 import type { Venue } from "@/lib/types";
 
 /**
@@ -26,9 +32,23 @@ export function VenueBooking({
 }) {
   const hourly = formatMoney(venue.price_per_hour, venue.currency);
   const peak = formatMoney(venue.peak_price_per_hour, venue.currency);
+  /*
+   * A venue with a peak rate has no single answer to "what will this cost", and
+   * this panel does not know which side of peak a Sunday afternoon falls on —
+   * the venue's own notes are where that lives. So it quotes the range and lets
+   * the host read the rate card, rather than printing the off-peak number with
+   * a confidence it has not earned.
+   */
+  const hours = estimateMinutes ? estimateMinutes / 60 : null;
   const estimate =
-    venue.price_per_hour != null && estimateMinutes
-      ? formatMoney((venue.price_per_hour * estimateMinutes) / 60, venue.currency)
+    venue.price_per_hour != null && hours
+      ? venue.peak_price_per_hour != null
+        ? formatMoneyRange(
+            venue.price_per_hour * hours,
+            venue.peak_price_per_hour * hours,
+            venue.currency,
+          )
+        : formatMoney(venue.price_per_hour * hours, venue.currency)
       : null;
 
   const window =
@@ -39,7 +59,7 @@ export function VenueBooking({
 
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="font-medium">{venue.name}</p>
           <p className="mt-0.5 text-xs text-ink-soft">
@@ -52,14 +72,14 @@ export function VenueBooking({
             href={venue.booking_url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex min-h-tap shrink-0 items-center rounded-lg bg-ok-solid px-3 py-2 text-sm font-medium text-ok-solid-fg transition hover:brightness-110 active:scale-95"
+            className="inline-flex min-h-tap w-full shrink-0 items-center justify-center rounded-lg bg-ok-solid px-3 py-2 text-sm font-medium text-ok-solid-fg transition hover:brightness-110 active:scale-95 sm:w-auto"
           >
             Open {venue.platform_name ?? "booking"} ↗
           </a>
         ) : (
           <Link
             href={`/venues#v-${venue.id}`}
-            className="inline-flex min-h-tap shrink-0 items-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium transition hover:bg-surface-2"
+            className="inline-flex min-h-tap w-full shrink-0 items-center justify-center rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm font-medium transition hover:bg-surface-2 sm:w-auto"
           >
             Add a booking link
           </Link>

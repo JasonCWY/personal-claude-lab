@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bookingWindow,
   buildSlotGrid,
+  formatDateRange,
   DAY_MINUTES,
   formatDateSpan,
   formatDays,
@@ -13,6 +14,7 @@ import {
   formatDuration,
   formatKl,
   formatMoney,
+  formatMoneyRange,
   instantToKl,
   klToInstant,
   shiftDate,
@@ -318,5 +320,34 @@ describe("money", () => {
 
   it("has nothing to say about an unpriced venue", () => {
     expect(formatMoney(null, "MYR")).toBeNull();
+  });
+});
+
+describe("price ranges", () => {
+  it("quotes a range when a venue has a peak rate", () => {
+    expect(formatMoneyRange(50, 70, "MYR")).toBe("RM 50.00–70.00");
+  });
+
+  it("collapses to one price when both rates are the same", () => {
+    expect(formatMoneyRange(30, 30, "MYR")).toBe("RM 30.00");
+  });
+
+  it("orders a backwards pair rather than printing it backwards", () => {
+    // A "peak" cheaper than the base rate is a typo in the venue form.
+    expect(formatMoneyRange(70, 50, "MYR")).toBe("RM 50.00–70.00");
+  });
+});
+
+describe("poll date range", () => {
+  it("says a single day once, not twice", () => {
+    expect(formatDateRange("2026-09-13", "2026-09-13")).toBe("Sun 13 Sep");
+  });
+
+  it("names both ends within a month", () => {
+    expect(formatDateRange("2026-09-12", "2026-09-13")).toBe("Sat 12 – Sun 13 Sep");
+  });
+
+  it("names both months when the window straddles one", () => {
+    expect(formatDateRange("2026-09-28", "2026-10-02")).toBe("Mon 28 Sep – Fri 2 Oct");
   });
 });
