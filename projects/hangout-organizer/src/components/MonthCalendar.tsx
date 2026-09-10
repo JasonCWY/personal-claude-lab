@@ -7,6 +7,12 @@ export interface CalendarEntry {
   label: string;
   /** YYYY-MM-DD in Kuala Lumpur terms. */
   date: string;
+  /**
+   * HH:MM in Kuala Lumpur terms, for entries that have a start time. Events
+   * carry a date but no clock time, so they are left undefined and sort ahead
+   * of the timed entries the way an all-day row does in any other calendar.
+   */
+  time?: string;
   tone: "session" | "event";
   detail?: string;
 }
@@ -32,8 +38,22 @@ export function MonthCalendar({
   // Monday-first offset.
   const leading = (firstOfMonth.getUTCDay() + 6) % 7;
 
+  /*
+   * A day cell and an agenda row both read top to bottom, so the order inside a
+   * day has to be the order the day happens in — not the order the two queries
+   * came back in, which put every session ahead of every event regardless of
+   * clock time. Sort once here rather than at each call site: the component
+   * owns how a day reads.
+   */
+  const inOrder = [...entries].sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.time ?? "").localeCompare(b.time ?? "") ||
+      a.label.localeCompare(b.label),
+  );
+
   const byDate = new Map<string, CalendarEntry[]>();
-  for (const entry of entries) {
+  for (const entry of inOrder) {
     const bucket = byDate.get(entry.date);
     if (bucket) bucket.push(entry);
     else byDate.set(entry.date, [entry]);
