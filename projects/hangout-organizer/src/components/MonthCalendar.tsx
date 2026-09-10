@@ -79,7 +79,15 @@ export function MonthCalendar({
   const agenda = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b));
 
   return (
-    <div>
+    <div className="flex flex-col">
+      {/*
+        On a phone the month grid is mostly empty cells — five blank week rows
+        stood between the top of the screen and the agenda, which is the part
+        that actually says what is happening. The list goes first there and the
+        grid stays underneath for shape. From `sm` the labels are back in the
+        cells, so the grid leads again.
+      */}
+      <div className="order-2 sm:order-1">
       <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-ink-soft">
         {WEEKDAYS.map((d) => (
           <div key={d} className="py-1">
@@ -109,8 +117,13 @@ export function MonthCalendar({
                 {Number(date.slice(-2))}
               </div>
 
-              <div className="mt-1 flex gap-0.5 sm:hidden" aria-hidden>
-                {dayEntries.slice(0, 4).map((entry) => (
+              {/*
+                Four dots was the cap, and a day with eight looked identical to
+                a day with four — the one reading where the count is the whole
+                point. Past three, the overflow is counted rather than dropped.
+              */}
+              <div className="mt-1 flex items-center gap-0.5 sm:hidden" aria-hidden>
+                {dayEntries.slice(0, dayEntries.length > 4 ? 3 : 4).map((entry) => (
                   <span
                     key={entry.id}
                     className={`h-1.5 w-1.5 rounded-full ${
@@ -118,6 +131,11 @@ export function MonthCalendar({
                     }`}
                   />
                 ))}
+                {dayEntries.length > 4 && (
+                  <span className="text-[0.6rem] leading-none text-ink-soft">
+                    +{dayEntries.length - 3}
+                  </span>
+                )}
               </div>
 
               <div className="mt-1 hidden space-y-1 sm:block">
@@ -140,9 +158,10 @@ export function MonthCalendar({
           );
         })}
       </div>
+      </div>
 
       {agenda.length > 0 && (
-        <ul className="mt-4 space-y-2 border-t border-line pt-4 sm:hidden">
+        <ul className="order-1 mb-4 space-y-2 border-b border-line pb-4 sm:hidden">
           {agenda.map(([date, dayEntries]) => (
             <li key={date} className="flex gap-3">
               <span className="w-12 shrink-0 pt-2 text-xs tabular-nums text-ink-soft">
