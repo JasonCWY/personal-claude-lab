@@ -137,7 +137,17 @@ function AvailabilityGridImpl({ spec, selected, onChange }: Props) {
           */}
           <thead>
             <tr>
-              <th className="sticky left-0 z-10 bg-surface px-1 py-1" />
+            {/*
+              `w-px` on the label column, not a width: a table cell cannot go
+              below its content, so this collapses the column to exactly the
+              width of "14:00–15:00" and hands every remaining pixel to the day
+              columns. Without it the spare width landed on the labels — on a
+              390px phone that was 235px of text against a 117px tap target,
+              which is the wrong way round for the column you have to hit
+              accurately. Most visible on a one- or two-day poll, where there is
+              the most spare width to misplace.
+            */}
+              <th className="sticky left-0 z-10 w-px bg-surface px-1 py-1" />
               {days.map((day, i) => {
                 const { weekday, dayOfMonth, month, showMonth } = dayHeaders[i];
                 return (
@@ -161,7 +171,7 @@ function AvailabilityGridImpl({ spec, selected, onChange }: Props) {
           <tbody>
             {times.map((time, ti) => (
               <tr key={time}>
-                <th className="sticky left-0 z-10 whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
+                <th className="sticky left-0 z-10 w-px whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
                   <span className="text-[0.7rem]">{timeLabels[ti]}</span>
                 </th>
                 {days.map((day, di) => {
