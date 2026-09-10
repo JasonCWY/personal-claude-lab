@@ -10,15 +10,10 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
-import { CURRENCY } from "@/lib/slots";
+import { CURRENCY, formatMoney } from "@/lib/slots";
 import type { Sport, Venue } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-function money(value: number | null, currency: string) {
-  if (value == null) return null;
-  return `${currency === "MYR" ? "RM" : currency} ${Number(value).toFixed(2)}`;
-}
 
 export default async function VenuesPage() {
   const supabase = await createClient();
@@ -88,7 +83,12 @@ export default async function VenuesPage() {
       ) : (
         <div className="space-y-3">
           {venues.map((venue) => (
-            <Card key={venue.id}>
+            /*
+             * A confirmed session links here as /venues#v-<id>. The scroll
+             * margin keeps the card clear of the sticky header, and the ring
+             * says which of a dozen near-identical cards was meant.
+             */
+            <Card key={venue.id} id={`v-${venue.id}`} className="scroll-mt-24 target:ring-2 target:ring-accent">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <h3 className="font-medium">{venue.name}</h3>
@@ -96,11 +96,11 @@ export default async function VenuesPage() {
                     {[
                       venue.sport_id ? sportName.get(venue.sport_id) : null,
                       venue.platform_name,
-                      money(venue.price_per_hour, venue.currency)
-                        ? `${money(venue.price_per_hour, venue.currency)}/hr`
+                      formatMoney(venue.price_per_hour, venue.currency)
+                        ? `${formatMoney(venue.price_per_hour, venue.currency)}/hr`
                         : null,
-                      money(venue.peak_price_per_hour, venue.currency)
-                        ? `peak ${money(venue.peak_price_per_hour, venue.currency)}/hr`
+                      formatMoney(venue.peak_price_per_hour, venue.currency)
+                        ? `peak ${formatMoney(venue.peak_price_per_hour, venue.currency)}/hr`
                         : null,
                       venue.booking_opens_days_ahead != null
                         ? `opens ${venue.booking_opens_days_ahead}d ahead`

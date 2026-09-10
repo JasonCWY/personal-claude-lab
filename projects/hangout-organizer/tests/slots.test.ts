@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bookingWindow,
   buildSlotGrid,
   DAY_MINUTES,
   formatDateSpan,
@@ -11,6 +12,7 @@ import {
   defaultPollRange,
   formatDuration,
   formatKl,
+  formatMoney,
   instantToKl,
   klToInstant,
   shiftDate,
@@ -262,5 +264,59 @@ describe("date-only polls", () => {
     expect(formatDateSpan(klToInstant("2026-09-29", "00:00"), 4 * DAY_MINUTES)).toBe(
       "Tue 29 Sep – Fri 2 Oct",
     );
+  });
+});
+
+describe("booking window", () => {
+  const session = klToInstant("2026-09-20", "19:00");
+
+  it("opens the venue's lead time before the session day", () => {
+    const w = bookingWindow(session, 7, klToInstant("2026-09-10", "12:00"));
+    expect(w.opensOn).toBe("2026-09-13");
+    expect(w.isOpen).toBe(false);
+    expect(w.daysAway).toBe(3);
+  });
+
+  it("counts the opening day itself as open, from midnight KL", () => {
+    // 09:00 on the 13th is inside the window even though the session is at
+    // 19:00 — the platform opens the day, not the hour.
+    const w = bookingWindow(session, 7, klToInstant("2026-09-13", "09:00"));
+    expect(w.isOpen).toBe(true);
+    expect(w.daysAway).toBe(0);
+  });
+
+  it("stays open once the window has passed", () => {
+    expect(bookingWindow(session, 7, klToInstant("2026-09-18", "09:00")).isOpen).toBe(true);
+  });
+
+  it("treats a zero lead time as open on the day", () => {
+    const w = bookingWindow(session, 0, klToInstant("2026-09-19", "23:00"));
+    expect(w.opensOn).toBe("2026-09-20");
+    expect(w.isOpen).toBe(false);
+    expect(w.daysAway).toBe(1);
+  });
+
+  it("crosses a month boundary backwards", () => {
+    expect(bookingWindow(klToInstant("2026-10-02", "19:00"), 14).opensOn).toBe("2026-09-18");
+  });
+
+  it("uses KL days, not UTC ones", () => {
+    // 00:30 KL on the 20th is still the 19th in UTC. The window is a KL fact.
+    expect(bookingWindow(klToInstant("2026-09-20", "00:30"), 7).opensOn).toBe("2026-09-13");
+  });
+});
+
+describe("money", () => {
+  it("shows MYR as RM, to two decimals", () => {
+    expect(formatMoney(24, "MYR")).toBe("RM 24.00");
+    expect(formatMoney(24.5, "MYR")).toBe("RM 24.50");
+  });
+
+  it("falls back to the currency code", () => {
+    expect(formatMoney(24, "SGD")).toBe("SGD 24.00");
+  });
+
+  it("has nothing to say about an unpriced venue", () => {
+    expect(formatMoney(null, "MYR")).toBeNull();
   });
 });

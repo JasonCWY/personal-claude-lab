@@ -398,6 +398,26 @@ export async function updateSessionRules(form: FormData) {
   revalidatePath(`/polls/${pollId}`);
 }
 
+/**
+ * Attach or change the venue on an already-confirmed session.
+ *
+ * The venue is picked at confirm time, but it is the one part of a booking that
+ * routinely changes afterwards — the usual court is full, someone finds a
+ * cheaper hall — and the only way to correct it was to unconfirm, which throws
+ * away the attendee snapshot to fix a dropdown.
+ */
+export async function setSessionVenue(form: FormData) {
+  const supabase = await createClient();
+  const pollId = str(form, "poll_id");
+
+  await supabase
+    .from("sessions")
+    .update({ venue_id: optStr(form, "venue_id") })
+    .eq("id", str(form, "id"));
+
+  revalidatePath(`/polls/${pollId}`);
+}
+
 export async function confirmSession(form: FormData) {
   const supabase = await createClient();
   const id = str(form, "id");
