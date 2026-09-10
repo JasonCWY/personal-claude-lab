@@ -1,3 +1,5 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { PollForm } from "@/components/PollForm";
@@ -20,6 +22,62 @@ import type {
 
 export const dynamic = "force-dynamic";
 
+/*
+ * One query, two readers. generateMetadata runs before the page renders, and a
+ * second look-up here would put an extra Tokyo round trip on the friend-facing
+ * page — the one opened from a phone on mobile data, where this file already
+ * goes out of its way to avoid avoidable hops. React's cache() dedupes within
+ * a request, so the unfurl and the page share the same row.
+ */
+const getPoll = cache(async (token: string) => {
+  const { data } = await createServiceClient()
+    .from("polls")
+    .select("*")
+    .eq("share_token", token)
+    .maybeSingle<Poll>();
+  return data;
+});
+
+/**
+ * What WhatsApp shows when the host pastes the link.
+ *
+ * Every share link used to unfurl as "Hangout Organizer" with the app's generic
+ * description — the same card for every poll, in the one place where the link
+ * is actually seen. The preview now carries the poll and its dates, so the
+ * message reads as an invitation before anyone taps it.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const poll = await getPoll(token);
+  if (!poll) return { title: "Poll not found" };
+
+  const when =
+    poll.granularity === "date"
+      ? formatDateRange(poll.poll_start_date, poll.poll_end_date)
+      : `${formatDateRange(poll.poll_start_date, poll.poll_end_date)}, ${poll.day_start_time.slice(
+          0,
+          5,
+        )}–${poll.day_end_time.slice(0, 5)}`;
+
+  const title =
+    poll.status === "polling" ? `${poll.title} — when are you free?` : poll.title;
+  const description =
+    poll.status === "polling"
+      ? `${when}. Tap your name and mark when you can make it.`
+      : `${when}. This poll has closed.`;
+
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary", title, description },
+  };
+}
+
 /**
  * PUBLIC page — no login. Reads run on the secret-key client, scoped by the
  * share token, because friends have no Supabase session and RLS grants `anon`
@@ -37,11 +95,7 @@ export default async function PublicPollPage({
   const { token } = await params;
   const supabase = createServiceClient();
 
-  const { data: poll } = await supabase
-    .from("polls")
-    .select("*")
-    .eq("share_token", token)
-    .maybeSingle<Poll>();
+  const poll = await getPoll(token);
   if (!poll) notFound();
 
   const [
@@ -131,7 +185,7 @@ export default async function PublicPollPage({
             {byDate ? "" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`}
           </p>
         </div>
-        <ThemeToggle className="shrink-0" />
+        <ThemeToggle className="hidden shrink-0 sm:flex" />
       </div>
 
       {sessions.length > 0 && (
@@ -192,6 +246,16 @@ export default async function PublicPollPage({
             existingOptOuts={existingOptOuts}
           />
         )}
+      </div>
+
+      {/*
+        On a phone the three-way toggle was ~190px of chrome at the top right of
+        the first thing a friend sees, pushing the poll title onto two lines.
+        It still belongs on this page — these links get opened in bed — just not
+        ahead of the question being asked. Wide screens have room for it up top.
+      */}
+      <div className="mt-6 flex justify-center sm:hidden">
+        <ThemeToggle />
       </div>
     </main>
   );

@@ -47,7 +47,8 @@ export function HeatmapGrid({
       <table className="min-w-full border-separate border-spacing-0.5 text-center text-xs">
         <thead>
           <tr>
-            <th className="sticky left-0 bg-surface px-2 py-1" />
+            {/* See AvailabilityGrid: w-px collapses the label column. */}
+            <th className="sticky left-0 w-px bg-surface px-2 py-1" />
             {days.map((day, i) => {
               const { weekday, dayOfMonth, month } = formatDayHeader(day);
               const showMonth = i === 0 || formatDayHeader(days[i - 1]).month !== month;
@@ -72,7 +73,7 @@ export function HeatmapGrid({
         <tbody>
           {times.map((time, ti) => (
             <tr key={time}>
-              <th className="sticky left-0 whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
+              <th className="sticky left-0 w-px whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
                 <span className="text-[0.7rem]">
                   {spec.granularity === "date"
                     ? "free"

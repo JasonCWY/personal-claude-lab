@@ -1,10 +1,53 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { PublicChecklist } from "@/components/PublicChecklist";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { formatDayHeader } from "@/lib/slots";
 import type { EventTask, HangoutEvent, Person } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+/* One query shared by the unfurl and the page. See s/[token] for why. */
+const getEvent = cache(async (token: string) => {
+  const { data } = await createServiceClient()
+    .from("events")
+    .select("*")
+    .eq("share_token", token)
+    .maybeSingle<HangoutEvent>();
+  return data;
+});
+
+/** What WhatsApp shows when the host pastes the checklist link. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const event = await getEvent(token);
+  if (!event) return { title: "Event not found" };
+
+  const title = event.title;
+  const description =
+    [event.event_date ? formatEventDate(event.event_date) : null, event.location]
+      .filter(Boolean)
+      .join(" · ") || "Date to be confirmed";
+
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary", title, description },
+  };
+}
+
+/** "2026-09-13" -> "Sun 13 Sep". A date friends read, not a database value. */
+function formatEventDate(date: string): string {
+  const { weekday, dayOfMonth, month } = formatDayHeader(date);
+  return `${weekday} ${dayOfMonth} ${month}`;
+}
 
 /** PUBLIC page — no login. Ticking is allowed; editing the list is not. */
 export default async function PublicEventPage({
@@ -15,11 +58,7 @@ export default async function PublicEventPage({
   const { token } = await params;
   const supabase = createServiceClient();
 
-  const { data: event } = await supabase
-    .from("events")
-    .select("*")
-    .eq("share_token", token)
-    .maybeSingle<HangoutEvent>();
+  const event = await getEvent(token);
   if (!event) notFound();
 
   const [{ data: taskData }, { data: peopleData }] = await Promise.all([
@@ -41,11 +80,15 @@ export default async function PublicEventPage({
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">{event.title}</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            {[event.event_date, event.location].filter(Boolean).join(" · ") ||
-              "Date to be confirmed"}
+            {[
+              event.event_date ? formatEventDate(event.event_date) : null,
+              event.location,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "Date to be confirmed"}
           </p>
         </div>
-        <ThemeToggle className="shrink-0" />
+        <ThemeToggle className="hidden shrink-0 sm:flex" />
       </div>
       {event.notes && <p className="mt-3 text-sm text-ink-muted">{event.notes}</p>}
 
@@ -67,6 +110,11 @@ export default async function PublicEventPage({
       <p className="mt-4 text-xs text-ink-soft">
         Ticking a task updates it for everyone. Ask the host to add or change tasks.
       </p>
+
+      {/* Off the top of the first screen on a phone. See s/[token]. */}
+      <div className="mt-6 flex justify-center sm:hidden">
+        <ThemeToggle />
+      </div>
     </main>
   );
 }
