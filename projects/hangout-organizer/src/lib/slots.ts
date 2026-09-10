@@ -53,6 +53,79 @@ export function formatKl(instant: Date): string {
   return `${weekday} ${Number(d)} ${month}, ${time}`;
 }
 
+/** RM 24.00. Each venue carries its own currency code; MYR gets the symbol. */
+export function formatMoney(value: number | null | undefined, currency = CURRENCY): string | null {
+  if (value == null) return null;
+  return `${currency === "MYR" ? "RM" : currency} ${Number(value).toFixed(2)}`;
+}
+
+/**
+ * "RM 50.00–70.00". Used where a price is a range rather than a number — an
+ * off-peak and a peak rate for the same court. Ordered defensively: a venue
+ * whose "peak" is cheaper than its base rate is a data-entry slip, not a reason
+ * to print a backwards range.
+ */
+export function formatMoneyRange(
+  a: number,
+  b: number,
+  currency = CURRENCY,
+): string | null {
+  const low = Math.min(a, b);
+  const high = Math.max(a, b);
+  if (low === high) return formatMoney(low, currency);
+  const highText = formatMoney(high, currency)!;
+  // The unit is already on the low end; repeating it reads as two prices.
+  return `${formatMoney(low, currency)}–${highText.slice(highText.indexOf(" ") + 1)}`;
+}
+
+/**
+ * The polled window as a person would say it: "Sun 13 Sep", or
+ * "Sat 12 – Sun 13 Sep" across days, or both months when it straddles one.
+ *
+ * A poll's dates used to print raw — "2026-09-13 to 2026-09-13" — which says
+ * the same date twice, in a format nobody speaks, on the screen and in the
+ * WhatsApp message that friends actually read.
+ */
+export function formatDateRange(startDate: string, endDate: string): string {
+  const a = formatDayHeader(startDate);
+  if (startDate === endDate) return `${a.weekday} ${a.dayOfMonth} ${a.month}`;
+  const b = formatDayHeader(endDate);
+  return a.month === b.month
+    ? `${a.weekday} ${a.dayOfMonth} – ${b.weekday} ${b.dayOfMonth} ${b.month}`
+    : `${a.weekday} ${a.dayOfMonth} ${a.month} – ${b.weekday} ${b.dayOfMonth} ${b.month}`;
+}
+
+export interface BookingWindow {
+  /** KL date the platform starts accepting this booking, YYYY-MM-DD. */
+  opensOn: string;
+  /** Whether that day has arrived. */
+  isOpen: boolean;
+  /** Whole KL days until it does. Zero once open. */
+  daysAway: number;
+}
+
+/**
+ * A venue that takes bookings N days ahead opens this session's slot N days
+ * before it — which is the single fact that decides whether the host acts now
+ * or sets a reminder, and it was previously left as "opens 7d ahead" for them
+ * to work out against a date on another part of the screen.
+ *
+ * Compared in whole KL days, not instants: a window that opens today is open at
+ * 09:00, not only once the clock passes the session's own start time.
+ */
+export function bookingWindow(
+  confirmedStart: Date,
+  daysAhead: number,
+  now = new Date(),
+): BookingWindow {
+  const opensOn = shiftDate(instantToKl(confirmedStart).date, -Math.max(0, daysAhead));
+  const today = instantToKl(now).date;
+  const daysAway = Math.round(
+    (Date.parse(`${opensOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / DAY_MS,
+  );
+  return { opensOn, isOpen: daysAway <= 0, daysAway: Math.max(0, daysAway) };
+}
+
 export function formatDuration(minutes: number): string {
   if (minutes % 60 === 0) return `${minutes / 60}hr`;
   return `${Math.floor(minutes / 60)}hr ${minutes % 60}min`;

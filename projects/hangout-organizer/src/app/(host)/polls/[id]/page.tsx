@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -5,6 +6,7 @@ import {
   deletePoll,
   duplicatePoll,
   setPollStatus,
+  setSessionVenue,
   unconfirmSession,
 } from "@/lib/actions";
 import { Badge, Button, Card, Empty, ErrorBanner, PageHeader, Select } from "@/components/ui";
@@ -12,13 +14,20 @@ import { ShareMessage } from "@/components/ShareMessage";
 import { HeatmapGrid } from "@/components/HeatmapGrid";
 import { ResponseSummary } from "@/components/ResponseSummary";
 import { BookableBlocks } from "@/components/BookableBlocks";
+import { VenueBooking } from "@/components/VenueBooking";
 import {
   computeCandidates,
   computeSlotCounts,
   groupCandidates,
   overlappingPeople,
 } from "@/lib/quorum";
-import { formatDateSpan, formatDays, formatDuration, formatSpan } from "@/lib/slots";
+import {
+  formatDateRange,
+  formatDateSpan,
+  formatDays,
+  formatDuration,
+  formatSpan,
+} from "@/lib/slots";
 import { SITE_URL } from "@/lib/env";
 import type {
   AvailabilityRow,
@@ -158,8 +167,8 @@ export default async function PollPage({
   const defaultMessage = [
     `${poll.title} — when are you free?`,
     byDate
-      ? `${poll.poll_start_date} to ${poll.poll_end_date}`
-      : `${poll.poll_start_date} to ${poll.poll_end_date}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
+      ? formatDateRange(poll.poll_start_date, poll.poll_end_date)
+      : `${formatDateRange(poll.poll_start_date, poll.poll_end_date)}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
     activityNames ? `Planning: ${activityNames}` : "",
     poll.notes ?? "",
     "",
@@ -203,7 +212,7 @@ export default async function PollPage({
     <>
       <PageHeader
         title={poll.title}
-        subtitle={`${poll.poll_start_date} to ${poll.poll_end_date}${
+        subtitle={`${formatDateRange(poll.poll_start_date, poll.poll_end_date)}${
           byDate ? " · whole dates" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`
         } · ${roster.length} asked${group ? ` (${group.name})` : ""}`}
         action={<Badge tone={poll.status === "polling" ? "amber" : "slate"}>{poll.status}</Badge>}
@@ -355,23 +364,41 @@ export default async function PollPage({
                     .map((pid) => names.get(pid) ?? pid)
                     .join(", ")}
                 </p>
-                {venue && (
-                  <p className="mt-1 text-sm text-ok-fg">
-                    {venue.name}
-                    {venue.booking_url && (
-                      <>
-                        {" — "}
-                        <a
-                          className="underline"
-                          href={venue.booking_url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          book it
-                        </a>
-                      </>
-                    )}
-                  </p>
+                {venue ? (
+                  <VenueBooking
+                    venue={venue}
+                    start={new Date(session.confirmed_start_at)}
+                    estimateMinutes={byDate ? null : session.confirmed_duration_minutes}
+                  />
+                ) : (
+                  <form
+                    action={setSessionVenue}
+                    className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-surface p-3"
+                  >
+                    <input type="hidden" name="id" value={session.id} />
+                    <input type="hidden" name="poll_id" value={poll.id} />
+                    <div className="min-w-[12rem] flex-1">
+                      <label className="mb-1 block text-xs text-ink-soft">
+                        No venue on this booking yet
+                      </label>
+                      <Select name="venue_id" defaultValue="">
+                        <option value="">Pick a venue…</option>
+                        {bookableVenues(venues, session.sport_id).map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                            {v.platform_name ? ` — ${v.platform_name}` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Button type="submit">Save</Button>
+                    <Link
+                      href="/venues"
+                      className="min-h-tap px-1 py-2 text-sm text-ink-muted underline transition-colors hover:text-ink"
+                    >
+                      Manage venues
+                    </Link>
+                  </form>
                 )}
                 <form action={unconfirmSession} className="mt-3">
                   <input type="hidden" name="id" value={session.id} />
@@ -387,7 +414,7 @@ export default async function PollPage({
                 pollId={poll.id}
                 blocks={blocks}
                 roster={roster}
-                venues={venues.filter((v) => !v.sport_id || v.sport_id === session.sport_id)}
+                venues={bookableVenues(venues, session.sport_id)}
                 defaultVenueId={session.venue_id}
                 minPlayersFull={session.min_players_full}
                 minPlayersShort={session.min_players_short}
@@ -448,4 +475,9 @@ export default async function PollPage({
       </div>
     </>
   );
+}
+
+/** A venue is offerable for a session if it is for that sport or for any. */
+function bookableVenues(venues: Venue[], sportId: string | null): Venue[] {
+  return venues.filter((v) => !v.sport_id || v.sport_id === sportId);
 }

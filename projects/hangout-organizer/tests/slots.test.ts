@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  bookingWindow,
   buildSlotGrid,
+  formatDateRange,
   DAY_MINUTES,
   formatDateSpan,
   formatDays,
@@ -11,6 +13,8 @@ import {
   defaultPollRange,
   formatDuration,
   formatKl,
+  formatMoney,
+  formatMoneyRange,
   instantToKl,
   klToInstant,
   shiftDate,
@@ -262,5 +266,88 @@ describe("date-only polls", () => {
     expect(formatDateSpan(klToInstant("2026-09-29", "00:00"), 4 * DAY_MINUTES)).toBe(
       "Tue 29 Sep – Fri 2 Oct",
     );
+  });
+});
+
+describe("booking window", () => {
+  const session = klToInstant("2026-09-20", "19:00");
+
+  it("opens the venue's lead time before the session day", () => {
+    const w = bookingWindow(session, 7, klToInstant("2026-09-10", "12:00"));
+    expect(w.opensOn).toBe("2026-09-13");
+    expect(w.isOpen).toBe(false);
+    expect(w.daysAway).toBe(3);
+  });
+
+  it("counts the opening day itself as open, from midnight KL", () => {
+    // 09:00 on the 13th is inside the window even though the session is at
+    // 19:00 — the platform opens the day, not the hour.
+    const w = bookingWindow(session, 7, klToInstant("2026-09-13", "09:00"));
+    expect(w.isOpen).toBe(true);
+    expect(w.daysAway).toBe(0);
+  });
+
+  it("stays open once the window has passed", () => {
+    expect(bookingWindow(session, 7, klToInstant("2026-09-18", "09:00")).isOpen).toBe(true);
+  });
+
+  it("treats a zero lead time as open on the day", () => {
+    const w = bookingWindow(session, 0, klToInstant("2026-09-19", "23:00"));
+    expect(w.opensOn).toBe("2026-09-20");
+    expect(w.isOpen).toBe(false);
+    expect(w.daysAway).toBe(1);
+  });
+
+  it("crosses a month boundary backwards", () => {
+    expect(bookingWindow(klToInstant("2026-10-02", "19:00"), 14).opensOn).toBe("2026-09-18");
+  });
+
+  it("uses KL days, not UTC ones", () => {
+    // 00:30 KL on the 20th is still the 19th in UTC. The window is a KL fact.
+    expect(bookingWindow(klToInstant("2026-09-20", "00:30"), 7).opensOn).toBe("2026-09-13");
+  });
+});
+
+describe("money", () => {
+  it("shows MYR as RM, to two decimals", () => {
+    expect(formatMoney(24, "MYR")).toBe("RM 24.00");
+    expect(formatMoney(24.5, "MYR")).toBe("RM 24.50");
+  });
+
+  it("falls back to the currency code", () => {
+    expect(formatMoney(24, "SGD")).toBe("SGD 24.00");
+  });
+
+  it("has nothing to say about an unpriced venue", () => {
+    expect(formatMoney(null, "MYR")).toBeNull();
+  });
+});
+
+describe("price ranges", () => {
+  it("quotes a range when a venue has a peak rate", () => {
+    expect(formatMoneyRange(50, 70, "MYR")).toBe("RM 50.00–70.00");
+  });
+
+  it("collapses to one price when both rates are the same", () => {
+    expect(formatMoneyRange(30, 30, "MYR")).toBe("RM 30.00");
+  });
+
+  it("orders a backwards pair rather than printing it backwards", () => {
+    // A "peak" cheaper than the base rate is a typo in the venue form.
+    expect(formatMoneyRange(70, 50, "MYR")).toBe("RM 50.00–70.00");
+  });
+});
+
+describe("poll date range", () => {
+  it("says a single day once, not twice", () => {
+    expect(formatDateRange("2026-09-13", "2026-09-13")).toBe("Sun 13 Sep");
+  });
+
+  it("names both ends within a month", () => {
+    expect(formatDateRange("2026-09-12", "2026-09-13")).toBe("Sat 12 – Sun 13 Sep");
+  });
+
+  it("names both months when the window straddles one", () => {
+    expect(formatDateRange("2026-09-28", "2026-10-02")).toBe("Mon 28 Sep – Fri 2 Oct");
   });
 });

@@ -3,12 +3,18 @@ import Link from "next/link";
 export function Card({
   children,
   className = "",
+  /** Set it to make a card a link target, e.g. /venues#v-<id>. */
+  id,
 }: {
   children: React.ReactNode;
   className?: string;
+  id?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-line bg-surface p-4 shadow-sm ${className}`}>
+    <div
+      id={id}
+      className={`rounded-xl border border-line bg-surface p-4 shadow-sm ${className}`}
+    >
       {children}
     </div>
   );

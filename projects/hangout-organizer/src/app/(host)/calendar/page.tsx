@@ -35,6 +35,7 @@ export default async function CalendarPage({
       id: `s-${s.id}`,
       href: `/polls/${s.poll_id}`,
       date: kl.date,
+      time: kl.time,
       label: `${kl.time} ${s.title}`,
       tone: "session",
       detail: `${s.title} · ${formatDuration(s.confirmed_duration_minutes ?? 0)}`,
