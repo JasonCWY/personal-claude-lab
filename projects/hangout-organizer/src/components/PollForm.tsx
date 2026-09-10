@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AvailabilityGrid } from "@/components/AvailabilityGrid";
 import { DateGrid } from "@/components/DateGrid";
 import type { GameSession, Person } from "@/lib/types";
+
+/** Which person this device answered as last time, across every poll. */
+const PERSON_KEY = "hangout-organizer:person-id";
 
 interface Props {
   token: string;
@@ -46,9 +49,46 @@ export function PollForm({
   const [declined, setDeclined] = useState(false);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const responded = new Set(respondedIds);
+  const declinedSetForInit = new Set(declinedIds);
+
+  /*
+   * Remember who this device is. The link arrives every week and the first
+   * thing it asked for was finding your own name in a grid of thirteen — a
+   * step that is the same answer every time. Read after mount, never during
+   * render: the server has no localStorage, and reading it inline would render
+   * one identity on the server and a different one in the browser.
+   *
+   * The person id is stored, not the name, and it is only honoured when that
+   * id is actually invited to THIS poll — a stale id from a poll someone is no
+   * longer part of should select nobody rather than the wrong person. "Not
+   * you?" clears it, which is the escape hatch for a shared phone.
+   */
+  useEffect(() => {
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(PERSON_KEY);
+    } catch {
+      // Private mode, or storage blocked. Falling back to the picker is fine.
+    }
+    if (!stored) return;
+    const person = roster.find((p) => p.id === stored);
+    if (person) {
+      setPersonId(person.id);
+      setSelected(new Set(existing[person.id] ?? []));
+      setOptOut(new Set(existingOptOuts[person.id] ?? []));
+      setDeclined(declinedSetForInit.has(person.id));
+    }
+    // Runs once on mount: this is about restoring a choice, not tracking props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const declinedSet = new Set(declinedIds);
 
   function pick(person: Person) {
+    try {
+      localStorage.setItem(PERSON_KEY, person.id);
+    } catch {
+      // Not being remembered is a smaller problem than not being able to answer.
+    }
     setPersonId(person.id);
     setSelected(new Set(existing[person.id] ?? []));
     setOptOut(new Set(existingOptOuts[person.id] ?? []));
@@ -118,6 +158,7 @@ export function PollForm({
 
   const me = roster.find((p) => p.id === personId);
   const byDate = spec.granularity === "date";
+  const nothingPicked = !declined && selected.size === 0;
 
   return (
     <div>
@@ -132,7 +173,14 @@ export function PollForm({
         </h2>
         <button
           type="button"
-          onClick={() => setPersonId(null)}
+          onClick={() => {
+            try {
+              localStorage.removeItem(PERSON_KEY);
+            } catch {
+              // Nothing to undo if it was never stored.
+            }
+            setPersonId(null);
+          }}
           className="-mr-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft underline transition-colors hover:text-ink"
         >
           Not you?
@@ -288,6 +336,18 @@ export function PollForm({
           </p>
         )}
 
+        {/*
+          Submitting an empty grid records exactly what the decline button
+          records, and nobody guesses that — so the ambiguous path is closed
+          and the explicit one named. Two answers that mean different things to
+          the host must not share a button.
+        */}
+        {nothingPicked && (
+          <p className="mb-2 text-xs text-ink-soft">
+            Pick at least one {byDate ? "date" : "time"}, or say you can&apos;t make any.
+          </p>
+        )}
+
         <div className="flex items-center gap-3">
           {!declined && (
             <span className="text-sm tabular-nums text-ink-soft">
@@ -297,7 +357,7 @@ export function PollForm({
           <button
             type="button"
             onClick={() => submit(declined)}
-            disabled={status === "saving"}
+            disabled={status === "saving" || nothingPicked}
             className="ml-auto min-h-tap flex-1 rounded-lg bg-accent px-4 py-2 font-medium text-accent-fg transition active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 sm:flex-none"
           >
             {status === "saving" ? "Saving…" : declined ? "Save my note" : "Submit"}
