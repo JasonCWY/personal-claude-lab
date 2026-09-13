@@ -49,12 +49,18 @@ export function ResponseSummary({
         empty="Nobody yet."
         people={voted.map((p) => {
           const n = slotsByPerson.get(p.id) ?? 0;
+          // Guests are counted into every window this person carries, so the
+          // host needs to see them next to the name doing the carrying — not
+          // only in the totals, where a headcount that exceeds the number of
+          // replies looks like a bug.
+          const guests = Math.max(0, (byPerson.get(p.id)?.party_size ?? 1) - 1);
+          const slots = n === 0 ? "no times marked" : `${n} ${unit}${n === 1 ? "" : "s"}`;
           return {
             id: p.id,
             name: p.display_name,
             // A response with no slots is not a decline — they submitted an
             // empty grid — and it is worth flagging rather than showing "0".
-            note: n === 0 ? "no times marked" : `${n} ${unit}${n === 1 ? "" : "s"}`,
+            note: guests > 0 ? `${slots} · +${guests}` : slots,
             comment: byPerson.get(p.id)?.comment ?? null,
             muted: n === 0,
           };

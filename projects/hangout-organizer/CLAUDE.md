@@ -64,15 +64,18 @@ many sessions: friends answer once, every session is scored against those answer
 `overlappingPeople()` can answer the clash question because both sessions share a poll.
 
 ```
-polls                 window + share_token + status; the thing friends answer
+polls                 window + share_token + status + closes_at; the thing
+                      friends answer
   poll_invitees       who was asked, FROZEN at creation
   availability        poll_id + person_id + slot_start
-  poll_responses      who submitted, when, any comment, and `declined`
+  poll_responses      who submitted, when, any comment, `declined`, and
+                      `party_size` — how many they are bringing
   sessions            an activity to book within the poll; own thresholds,
-                      own venue, own confirmed_start_at
+                      own venue, own confirmed_start_at, own court_number
     attendees         who was free for the window that got confirmed
 roster_groups         named sets of people
   roster_group_members
+push_subscriptions    the HOST's devices, for "someone answered" notifications
 ```
 
 ```
@@ -135,6 +138,36 @@ src/
   button: without one people either leave the link unanswered or invent a slot they cannot make,
   and both are worse for the host than a plain no. A decline carries no availability, and the
   route enforces that by ignoring any slots sent alongside it.
+- **Thresholds count BODIES, not rows.** `min_players_full` was always talking about people on
+  a court; until `party_size` existed (migration 010) responders and players happened to be the
+  same number. Six responders where two bring a friend is eight players, and booking a court for
+  six was simply wrong. Every quorum comparison goes through `headcountOf()`, and the intersection
+  loop in `computeCandidates` weighs the set rather than counting it — stopping on `people.size`
+  would discard windows that four responders bringing friends genuinely fill. What a block claims
+  is still carried by the PEOPLE in it: `groupCandidates` merges on a subset test over the person
+  sets, never on the weighted totals, or two different groups that happen to sum to the same
+  number would collapse into a block neither sustains.
+- **A poll can close itself, and that is not a background job.** `closes_at` is evaluated per
+  request by `lib/poll-state.ts` — the public page renders from it, the submit route enforces it,
+  the host page explains it, and all three ask the same function so they cannot drift. A deadline
+  that only greys out a button is not a deadline: the endpoint is public, and a late answer
+  silently changes the headcount under a booking already made. `status` and `closes_at` stay
+  separate on purpose — status is what the host DECIDED, `closes_at` is what they ANNOUNCED — and
+  clearing the cut-off is how you reopen a poll that shut itself. An unparseable `closes_at` is
+  treated as no deadline, because a link that silently refuses every answer is the worse failure.
+- **A `datetime-local` field is Kuala Lumpur wall-clock, never the server's clock.** `optInstant()`
+  in `actions.ts` reads it through `klToInstant`. The functions run in Tokyo (see Deploying), so
+  `new Date(value)` would have quietly moved every deadline an hour.
+- **`SITE_URL()` always carries a scheme.** Typed into the Vercel dashboard this gets written the
+  way a domain is spoken — `my-app.vercel.app` — and everything downstream still looks fine, but a
+  bare domain is not a URL, so iOS and WhatsApp render it as plain grey text with nothing to tap.
+  The share message is the entire distribution mechanism for this app; it cannot depend on how
+  carefully an environment variable was typed months ago.
+- **Declining is the other answer, not fine print.** It was an underlined text link — the
+  treatment you reach for to keep a destructive action quiet — and that was the bug. It is not
+  destructive, and the person who needs it has to find it on a phone below a month-long grid. It
+  is now a bordered full-width control, still outlined rather than filled so it cannot be mistaken
+  for Submit.
 - **Times are `timestamptz` UTC in the DB, rendered in Asia/Kuala_Lumpur at the edges.**
   `slots.ts` uses fixed +8 arithmetic because Malaysia has no DST — do not copy that to a timezone
   that does.
@@ -171,9 +204,52 @@ src/
 - **Sharing is a clipboard hand-off, not an integration.** The WhatsApp Business API is neither
   free nor worth it here; `CopyLink` builds a paste-ready message instead.
 
+## Notifications
+
+Web Push, to the HOST's own devices, fired from the request that records an answer. Nothing here
+is scheduled and nothing costs anything.
+
+- **Host-only, because there is nowhere to send a friend a notification.** `people` is a
+  `display_name` and nothing else — no email, no phone, no identity. Adding a contact channel for
+  friends is a much larger change than this was; notifying the one person who actually has an
+  account needs no new personal data at all.
+- **Web Push rather than email or WhatsApp.** It goes straight to the browser vendors' services
+  (FCM/APNs/Mozilla): no account, no quota, no bill, which is the same constraint that keeps an
+  LLM out of this project. Email would need a Resend/Postmark account and an address per person.
+- **Fired in `after()`, from the public availability route.** The counts and the fan-out run once
+  the friend's response is already on the wire, so Saving… is no slower than before — which was
+  the point of the latency work in e857d58. Everything in that block swallows its own errors: a
+  failure to notify is not a failure to record an answer.
+- **One notification per poll, replaced rather than stacked.** The submit endpoint is open to
+  anyone with the share link, so the number of pushes is bounded only by how many times someone
+  taps Save. The per-poll `tag` collapses them, and the body carries a running count so nothing is
+  lost by replacing the earlier ones. `renotify` is what still makes it buzz.
+- **`public/sw.js` has no `fetch` handler and no cache, deliberately.** Every page here is
+  `force-dynamic` because a poll is wrong the moment someone else answers. A caching worker would
+  serve friends a stale grid, silently, on the page opened by people who have never seen this app.
+  If you ever add caching, exclude `/s/` and `/e/` and think hard about the rest.
+- **The manifest is declared on `(host)/layout.tsx`, not the root layout.** Only the host should be
+  installing this, and friends opening a share link should get no install prompt and no worker.
+- **iOS only allows push from an installed app.** Safari exposes `PushManager` to a Home Screen
+  site and not to a tab, so `PushToggle` detects that case and says "Add to Home Screen" rather
+  than "unsupported". Android and desktop need only the permission prompt.
+- **`push_subscriptions` rows are bearer handles, not credentials the host chose.** Anyone who can
+  read one can ring that device. Hence the same `host_all` policy as every other table, and
+  `api/push/subscribe` writing through the COOKIE-BOUND client so RLS decides, not the service key.
+- **Subscriptions rotate silently.** `PushToggle` re-registers on every host page load when
+  permission is already granted, and `sendHostPush` deletes a row on a 404/410 — and only on those,
+  since deleting on a transient 500 would unsubscribe the host during someone else's outage.
+- **Never rotate the VAPID pair.** The public key is baked into every subscription a browser has
+  already made; a new pair invalidates every device and the only symptom is silence.
+
 ## Environment
 
-See `.env.local.example`. `HOST_EMAIL` is the real gate — Supabase will mint a session for any
+See `.env.local.example`. Three of the variables are the Web Push pair plus its subject; generate
+them once with `npx web-push generate-vapid-keys` and then leave them alone (see Notifications).
+`NEXT_PUBLIC_VAPID_PUBLIC_KEY` is public on purpose — the browser must hand it to
+`pushManager.subscribe`, and it authenticates the sender rather than authorising anything.
+
+`HOST_EMAIL` is the real gate — Supabase will mint a session for any
 address that completes a magic link, so `auth/callback/route.ts` signs out anyone who is not the
 host, and `(host)/layout.tsx` re-checks on every render.
 
@@ -205,7 +281,7 @@ ship to the browser, so anyone can drive Supabase's auth endpoints directly and 
 `authenticated` JWT without ever loading this app. `auth/callback` signing non-hosts out and the
 `(host)` layout re-check guard the *app*; they do nothing for PostgREST. The `host_allowlist` table
 plus the `is_host()` security-definer function are what guard the *data*. If you ever add a table,
-add it to the policy loop — a table with RLS on and no policy is closed, which fails safe, but a
+add it to the policy loop — `push_subscriptions` (migration 009) is the most recent one to join it — a table with RLS on and no policy is closed, which fails safe, but a
 table with the old `using (true)` policy would be open to any signed-up stranger.
 
 ## Deploying
@@ -236,4 +312,8 @@ and cannot be pinned. That is why it must not do network I/O — see `middleware
   belongs with `debt-tracker` once that is deployed. The `attendees` table already records who
   turned up, which is the join key that work will need.
 - **Recurring schedules.** "Duplicate for next week" is the recurrence story — no cron, no
-  background jobs.
+  scheduled jobs. Notifications did not change this: they are fired by the request that records an
+  answer, and a poll's cut-off is evaluated when someone asks rather than by something waking up.
+  The first feature that genuinely needs a scheduler — "remind everyone who has not answered" — is
+  also the first that needs a way to reach friends, and neither exists.
+- **Notifying friends.** Only the host can be notified; see Notifications for why.

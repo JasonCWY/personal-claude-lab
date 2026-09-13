@@ -8,8 +8,10 @@ import {
   setPollStatus,
   setSessionVenue,
   unconfirmSession,
+  updatePollDeadline,
+  updateSessionCourt,
 } from "@/lib/actions";
-import { Badge, Button, Card, Empty, ErrorBanner, PageHeader, Select } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorBanner, Input, PageHeader, Select } from "@/components/ui";
 import { ShareMessage } from "@/components/ShareMessage";
 import { HeatmapGrid } from "@/components/HeatmapGrid";
 import { ResponseSummary } from "@/components/ResponseSummary";
@@ -26,8 +28,11 @@ import {
   formatDateSpan,
   formatDays,
   formatDuration,
+  formatKl,
   formatSpan,
+  instantToKl,
 } from "@/lib/slots";
+import { formatTimeLeft, pollClosedReason } from "@/lib/poll-state";
 import { SITE_URL } from "@/lib/env";
 import type {
   AvailabilityRow,
@@ -151,6 +156,22 @@ export default async function PollPage({
     slotsByPerson.set(row.person_id, (slotsByPerson.get(row.person_id) ?? 0) + 1);
   }
 
+  // Guests count as bodies on a court — see migration 010 and `headcountOf`.
+  // Built from responses, not availability, because bringing someone is a
+  // property of the answer rather than of each slot they ticked.
+  const partySizes: Record<string, number> = {};
+  for (const r of responses) partySizes[r.person_id] = r.party_size ?? 1;
+  const guestTotal = responses
+    .filter((r) => !r.declined)
+    .reduce((n, r) => n + Math.max(0, (r.party_size ?? 1) - 1), 0);
+
+  const closedReason = pollClosedReason(poll);
+  const timeLeft = formatTimeLeft(poll);
+  // A datetime-local field wants KL wall-clock, which is what the host typed.
+  const deadlineValue = poll.closes_at
+    ? `${instantToKl(new Date(poll.closes_at)).date}T${instantToKl(new Date(poll.closes_at)).time}`
+    : "";
+
   const byDate = poll.granularity === "date";
 
   const spec = {
@@ -243,11 +264,39 @@ export default async function PollPage({
       </Card>
 
       <Card className="mb-6">
+        <h2 className="font-medium">Answer by</h2>
+        <p className="mt-0.5 text-sm text-ink-muted">
+          {closedReason === "cut-off"
+            ? `Closed itself on ${formatKl(new Date(poll.closes_at!))} — the link is no longer taking answers.`
+            : timeLeft
+              ? `Closes in about ${timeLeft}, on ${formatKl(new Date(poll.closes_at!))}.`
+              : "No deadline. The poll stays open until you close it."}
+        </p>
+        {/*
+          Separate from the open/close buttons on purpose. Those record what you
+          decided; this records what you announced — and clearing it is how you
+          reopen a poll that shut itself, without having to work out which of the
+          two shut it.
+        */}
+        <form action={updatePollDeadline} className="mt-3 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="id" value={poll.id} />
+          <div className="min-w-[13rem]">
+            <label className="mb-1 block text-xs text-ink-soft">Cut-off (Malaysia time)</label>
+            <Input type="datetime-local" name="closes_at" defaultValue={deadlineValue} />
+          </div>
+          <Button type="submit" variant="secondary">
+            {poll.closes_at ? "Update" : "Set deadline"}
+          </Button>
+        </form>
+      </Card>
+
+      <Card className="mb-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-medium">
             Who is free{" "}
             <span className="font-normal text-ink-soft">
               — {responses.length} of {roster.length} answered
+              {guestTotal > 0 && `, bringing ${guestTotal} more`}
             </span>
           </h2>
         </div>
@@ -305,7 +354,9 @@ export default async function PollPage({
               shortDurationMinutes: session.short_duration_minutes,
             },
             poll.slot_minutes,
+            partySizes,
           ),
+          partySizes,
         );
 
         return (
@@ -364,6 +415,11 @@ export default async function PollPage({
                     .map((pid) => names.get(pid) ?? pid)
                     .join(", ")}
                 </p>
+                {session.court_number && (
+                  <p className="mt-1 text-sm font-medium text-ok-fg">
+                    Court {session.court_number}
+                  </p>
+                )}
                 {venue ? (
                   <VenueBooking
                     venue={venue}
@@ -400,6 +456,33 @@ export default async function PollPage({
                     </Link>
                   </form>
                 )}
+
+                {/*
+                  Editable after the fact, because plenty of venues confirm the
+                  slot and allocate the court later. Without this the only way
+                  to add one was to unconfirm and reconfirm, which throws away
+                  the attendee snapshot taken at booking time.
+                */}
+                <form action={updateSessionCourt} className="mt-3 flex flex-wrap items-end gap-2">
+                  <input type="hidden" name="id" value={session.id} />
+                  <input type="hidden" name="poll_id" value={poll.id} />
+                  <div className="min-w-[8rem]">
+                    <label className="mb-1 block text-xs text-ok-fg">Court</label>
+                    <Input
+                      name="court_number"
+                      defaultValue={session.court_number ?? ""}
+                      placeholder="e.g. 3 or A2"
+                      maxLength={40}
+                    />
+                  </div>
+                  <Button type="submit" variant="secondary">
+                    {session.court_number ? "Update court" : "Add court"}
+                  </Button>
+                </form>
+                <p className="mt-1 text-xs text-ok-fg">
+                  Shown to everyone on the share link.
+                </p>
+
                 <form action={unconfirmSession} className="mt-3">
                   <input type="hidden" name="id" value={session.id} />
                   <input type="hidden" name="poll_id" value={poll.id} />

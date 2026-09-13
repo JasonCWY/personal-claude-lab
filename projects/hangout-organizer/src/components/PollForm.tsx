@@ -28,7 +28,12 @@ interface Props {
   sessions: GameSession[];
   /** person_id -> session_ids they previously said they were not up for. */
   existingOptOuts: Record<string, string[]>;
+  /** person_id -> how many they said they were bringing, themselves included. */
+  existingPartySizes: Record<string, number>;
 }
+
+/** Mirrors the check constraint in migration 010. */
+const MAX_PARTY = 20;
 
 export function PollForm({
   token,
@@ -39,6 +44,7 @@ export function PollForm({
   declinedIds,
   sessions,
   existingOptOuts,
+  existingPartySizes,
 }: Props) {
   const [personId, setPersonId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -47,6 +53,8 @@ export function PollForm({
   const [optOut, setOptOut] = useState<Set<string>>(new Set());
   // "None of these work for me" — an answer in its own right, not an empty one.
   const [declined, setDeclined] = useState(false);
+  // Including themselves, so 1 is "just me" and is the honest default.
+  const [partySize, setPartySize] = useState(1);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const responded = new Set(respondedIds);
   const declinedSetForInit = new Set(declinedIds);
@@ -77,6 +85,10 @@ export function PollForm({
       setSelected(new Set(existing[person.id] ?? []));
       setOptOut(new Set(existingOptOuts[person.id] ?? []));
       setDeclined(declinedSetForInit.has(person.id));
+      // Must restore alongside the rest. This path skips pick(), so without it
+      // a remembered device silently resets the party to 1, and the next save
+      // would quietly drop guests the host has already counted into a booking.
+      setPartySize(existingPartySizes[person.id] ?? 1);
     }
     // Runs once on mount: this is about restoring a choice, not tracking props.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,6 +105,7 @@ export function PollForm({
     setSelected(new Set(existing[person.id] ?? []));
     setOptOut(new Set(existingOptOuts[person.id] ?? []));
     setDeclined(declinedSet.has(person.id));
+    setPartySize(existingPartySizes[person.id] ?? 1);
     setStatus("idle");
   }
 
@@ -109,6 +122,7 @@ export function PollForm({
           comment: comment.trim() || null,
           optOutSessionIds: [...optOut],
           declined: asDecline,
+          partySize: asDecline ? 1 : partySize,
         }),
       });
       if (res.ok) {
@@ -269,6 +283,54 @@ export function PollForm({
         </div>
       )}
 
+      {!declined && (
+        /*
+         * Asked here rather than on the roster button, because it is a property
+         * of this ANSWER: someone free on Tuesday brings the same people to
+         * whichever slot ends up booked. It also has to sit above the decline
+         * below it, or the group size gets asked for after the person has
+         * already decided they are out.
+         */
+        <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3">
+          <h3 className="text-sm font-medium">How many of you?</h3>
+          <p className="mt-0.5 text-xs text-ink-soft">
+            Count yourself. Bump it up if you are bringing someone — guests count toward the
+            headcount, so it changes how long a court gets booked for.
+          </p>
+          <div className="mt-2 flex items-center gap-3">
+            <div className="inline-flex items-center rounded-lg border border-line-strong bg-surface">
+              <button
+                type="button"
+                aria-label="One fewer"
+                onClick={() => setPartySize((n) => Math.max(1, n - 1))}
+                disabled={partySize <= 1}
+                className="min-h-tap w-11 rounded-l-lg text-lg font-medium text-ink transition-colors hover:bg-surface-2 disabled:opacity-30"
+              >
+                −
+              </button>
+              <span
+                aria-live="polite"
+                className="min-w-[2.5rem] text-center text-base font-medium tabular-nums"
+              >
+                {partySize}
+              </span>
+              <button
+                type="button"
+                aria-label="One more"
+                onClick={() => setPartySize((n) => Math.min(MAX_PARTY, n + 1))}
+                disabled={partySize >= MAX_PARTY}
+                className="min-h-tap w-11 rounded-r-lg text-lg font-medium text-ink transition-colors hover:bg-surface-2 disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+            <span className="text-sm text-ink-muted">
+              {partySize === 1 ? "Just me" : `Me plus ${partySize - 1}`}
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 space-y-3">
         <input
           value={comment}
@@ -298,14 +360,42 @@ export function PollForm({
            * worse for the host than a plain no.
            */
           <div className="border-t border-line pt-3">
+            {/*
+              This used to be an underlined text link — the treatment you reach
+              for when you want to keep a destructive action quiet. That was the
+              mistake: declining is not destructive, it is the OTHER honest
+              answer, and the person who needs it has to find it on a phone at
+              the bottom of a month-long grid. A bordered, full-width control
+              reads as the second of two ways to answer rather than as fine
+              print. It stays outlined rather than filled, so it still cannot be
+              mistaken for the primary action.
+            */}
+            <p className="mb-2 text-xs text-ink-soft">None of it works?</p>
             <button
               type="button"
               onClick={() => submit(true)}
               disabled={status === "saving"}
-              className="rounded-lg py-1 text-sm font-medium text-ink-muted underline transition-colors hover:text-ink disabled:opacity-50"
+              className="flex min-h-tap w-full items-center justify-center gap-2 rounded-lg border border-bad-border bg-surface px-3.5 py-2 text-sm font-medium text-bad-fg transition hover:bg-bad-bg active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
             >
+              <svg
+                width="1em"
+                height="1em"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                aria-hidden="true"
+                className="text-[1.05rem]"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="m9 9 6 6M15 9l-6 6" />
+              </svg>
               I can&apos;t make any of {byDate ? "these dates" : "these times"}
             </button>
+            <p className="mt-2 text-xs text-ink-soft">
+              This is a real answer — the host sees it and stops chasing you.
+            </p>
           </div>
         )}
       </div>
@@ -352,6 +442,7 @@ export function PollForm({
           {!declined && (
             <span className="text-sm tabular-nums text-ink-soft">
               {selected.size} {byDate ? (selected.size === 1 ? "date" : "dates") : selected.size === 1 ? "slot" : "slots"}
+              {partySize > 1 && ` · ${partySize} of you`}
             </span>
           )}
           <button

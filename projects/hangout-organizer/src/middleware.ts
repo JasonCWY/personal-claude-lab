@@ -69,8 +69,14 @@ export const config = {
      * Everything except:
      *  - /s/, /e/, /api/public/  — the public share surface, which authorises
      *    itself by share token inside each route handler
+     *  - sw.js and manifest.json — fetched by the browser itself rather than
+     *    by a page, and a redirect to /login would hand the service worker
+     *    registration an HTML document instead of a script. Neither is
+     *    sensitive: the worker only receives push, the manifest only names the
+     *    app. What gates the host is the (host) layout and RLS, never who may
+     *    read a static asset.
      *  - Next internals and static assets
      */
-    "/((?!s/|e/|api/public/|_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)",
+    "/((?!s/|e/|api/public/|sw.js|manifest.json|_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)",
   ],
 };

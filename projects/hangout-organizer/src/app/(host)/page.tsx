@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
+import { PushToggle } from "@/components/PushToggle";
 import { formatDuration, formatSpan } from "@/lib/slots";
 import type { EventTask, GameSession, HangoutEvent, Poll, Sport } from "@/lib/types";
 
@@ -54,6 +55,10 @@ export default async function Dashboard() {
           </div>
         }
       />
+
+      <Card className="mb-8">
+        <PushToggle />
+      </Card>
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">

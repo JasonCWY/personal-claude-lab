@@ -1,5 +1,5 @@
 import { confirmSession } from "@/lib/actions";
-import { Badge, Button, Select } from "@/components/ui";
+import { Badge, Button, Input, Select } from "@/components/ui";
 import {
   DAY_MINUTES,
   formatDateSpan,
@@ -242,6 +242,14 @@ function BlockRow({
               </option>
             ))}
           </Select>
+        </div>
+
+        <div className="min-w-[8rem]">
+          {/* Optional, because it is often not known until the booking page
+              confirms it — and refusing to confirm without it would be the
+              worse trade. Free text: venues label courts "3", "A2", "Hall 2". */}
+          <label className="mb-1 block text-xs text-ink-soft">Court</label>
+          <Input name="court_number" placeholder="Optional" maxLength={40} />
         </div>
 
         <Button type="submit">Confirm</Button>

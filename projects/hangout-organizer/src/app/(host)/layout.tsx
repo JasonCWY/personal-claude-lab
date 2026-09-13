@@ -1,8 +1,20 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getHostIdentity } from "@/lib/auth";
 import { HostNav } from "@/components/HostNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
+
+/**
+ * Declared here rather than in the root layout on purpose: this is what makes
+ * the app installable, and only the host should be installing it. It is also
+ * what iOS requires before it will allow notifications at all — Safari exposes
+ * PushManager only to a site added to the Home Screen.
+ */
+export const metadata: Metadata = {
+  manifest: "/manifest.json",
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Hangout" },
+};
 
 /**
  * Auth guard. Middleware already redirects anonymous visitors, but this is the

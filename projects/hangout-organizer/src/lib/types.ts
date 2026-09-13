@@ -68,6 +68,14 @@ export interface Poll {
   day_end_time: string;
   slot_minutes: number;
   group_id: string | null;
+  /**
+   * When this poll stops accepting answers, or null for "until I close it".
+   *
+   * Evaluated per request rather than by a job — see `lib/poll-state.ts`. It is
+   * kept separate from `status` on purpose: this is what the host ANNOUNCED,
+   * `status` is what the host DECIDED.
+   */
+  closes_at: string | null;
   notes: string | null;
   created_at: string;
 }
@@ -89,6 +97,13 @@ export interface GameSession {
   venue_id: string | null;
   confirmed_start_at: string | null;
   confirmed_duration_minutes: number | null;
+  /**
+   * Which court, once it is booked. Free text because venues label them "3",
+   * "A2" and "Hall 2 / 5"; the app prints it and never does arithmetic on it.
+   * Shown on the public page, since standing in the right building and not
+   * knowing which court is the problem it exists to solve.
+   */
+  court_number: string | null;
   notes: string | null;
   created_at: string;
 }
@@ -110,6 +125,12 @@ export interface PollResponse {
    * not for that activity". A declined response carries no availability.
    */
   declined: boolean;
+  /**
+   * How many are coming with this answer, INCLUDING the person answering.
+   * 1 means just them. Counts toward the quorum as bodies — see
+   * `headcountOf` in `quorum.ts` and migration 010.
+   */
+  party_size: number;
 }
 
 /**

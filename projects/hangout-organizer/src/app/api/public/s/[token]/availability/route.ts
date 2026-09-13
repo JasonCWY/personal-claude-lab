@@ -1,17 +1,23 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { sendHostPush } from "@/lib/push";
+import { describeResponse } from "@/lib/push-message";
+import { pollClosedReason } from "@/lib/poll-state";
 import { buildSlotGrid } from "@/lib/slots";
 import type { Poll } from "@/lib/types";
 
 const MAX_SLOTS = 2000;
 const MAX_COMMENT = 500;
+/** Matches the check constraint in migration 010. */
+const MAX_PARTY = 20;
 
 /**
  * Public availability submission.
  *
  * Uses the secret key, so it must do its own authorisation. Four checks, all
  * necessary:
- *  1. The share token must resolve to a poll that is still open.
+ *  1. The share token must resolve to a poll that is still open — which now
+ *     means the host has not closed it AND its cut-off has not passed.
  *  2. The person must be INVITED TO THIS POLL — not merely on the roster.
  *     A poll addressed to the badminton group must not accept an answer from
  *     someone who was never asked.
@@ -33,6 +39,8 @@ export async function POST(
     optOutSessionIds?: string[];
     /** "None of these work for me." Answers the poll with no availability. */
     declined?: boolean;
+    /** How many are coming, including the person answering. Default 1. */
+    partySize?: number;
   };
   try {
     body = await request.json();
@@ -56,6 +64,15 @@ export async function POST(
   const comment =
     typeof body.comment === "string" ? body.comment.trim().slice(0, MAX_COMMENT) || null : null;
 
+  // Clamped rather than rejected. This decides how long a court is booked for
+  // and it arrives from an endpoint anyone with the link can post to, so it
+  // must be bounded — but a stepper that somehow sent 0 or 100 is a client bug,
+  // and failing a friend's whole submission over it helps nobody. A decline
+  // brings nobody, whatever the grid happened to have selected.
+  const partySize = declined
+    ? 1
+    : Math.min(MAX_PARTY, Math.max(1, Math.floor(Number(body.partySize) || 1)));
+
   const supabase = createServiceClient();
 
   const { data: poll } = await supabase
@@ -66,24 +83,53 @@ export async function POST(
   if (!poll) {
     return NextResponse.json({ error: "Unknown poll" }, { status: 404 });
   }
-  if (poll.status !== "polling") {
-    return NextResponse.json({ error: "This poll is closed" }, { status: 409 });
+  // The cut-off is enforced here, not by a scheduled job. A deadline that only
+  // greys out the button on the page is not a deadline: the endpoint is public,
+  // and a late answer silently changes the headcount under a booking that has
+  // already been made.
+  const closed = pollClosedReason(poll);
+  if (closed) {
+    return NextResponse.json(
+      {
+        error:
+          closed === "cut-off"
+            ? "This poll has closed — the deadline has passed."
+            : "This poll is closed",
+      },
+      { status: 409 },
+    );
   }
 
   // Checks 2 and 3 are independent of each other, and the session list is
   // needed either way, so all three go out together. Submitting used to be nine
   // sequential round trips to Supabase; the button sat on "Saving…" for the sum
   // of them.
-  const [{ data: invited }, { data: person }, { data: pollSessions }] = await Promise.all([
-    supabase
-      .from("poll_invitees")
-      .select("person_id")
-      .eq("poll_id", poll.id)
-      .eq("person_id", personId)
-      .maybeSingle(),
-    supabase.from("people").select("id").eq("id", personId).eq("is_active", true).maybeSingle(),
-    supabase.from("sessions").select("id").eq("poll_id", poll.id),
-  ]);
+  // The name and the prior response row are only for the notification, and they
+  // ride along here rather than costing their own round trips. `prior` is also
+  // the only chance to tell a new answer from a correction: the upsert below
+  // destroys that distinction.
+  const [{ data: invited }, { data: person }, { data: pollSessions }, { data: prior }] =
+    await Promise.all([
+      supabase
+        .from("poll_invitees")
+        .select("person_id")
+        .eq("poll_id", poll.id)
+        .eq("person_id", personId)
+        .maybeSingle(),
+      supabase
+        .from("people")
+        .select("id, display_name")
+        .eq("id", personId)
+        .eq("is_active", true)
+        .maybeSingle<{ id: string; display_name: string }>(),
+      supabase.from("sessions").select("id").eq("poll_id", poll.id),
+      supabase
+        .from("poll_responses")
+        .select("person_id")
+        .eq("poll_id", poll.id)
+        .eq("person_id", personId)
+        .maybeSingle(),
+    ]);
   if (!invited) {
     return NextResponse.json({ error: "You were not asked to this one" }, { status: 403 });
   }
@@ -171,9 +217,50 @@ export async function POST(
       submitted_at: new Date().toISOString(),
       comment,
       declined,
+      party_size: partySize,
     },
     { onConflict: "poll_id,person_id" },
   );
+
+  /*
+   * Tell the host — after the friend already has their answer back.
+   *
+   * `after()` is what keeps this free at the point of use: the counts below and
+   * the fan-out to the host's devices run once the response is on the wire, so
+   * the Saving… button is no slower than before notifications existed, which was
+   * the whole point of the round-trip work in e857d58.
+   *
+   * Everything in here is best-effort and swallows its own errors. A failure to
+   * notify is not a failure to record an answer, and the friend must never be
+   * told otherwise.
+   */
+  after(async () => {
+    try {
+      const [{ count: answered }, { count: invitedCount }] = await Promise.all([
+        supabase
+          .from("poll_responses")
+          .select("*", { count: "exact", head: true })
+          .eq("poll_id", poll.id),
+        supabase
+          .from("poll_invitees")
+          .select("*", { count: "exact", head: true })
+          .eq("poll_id", poll.id),
+      ]);
+      await sendHostPush(
+        describeResponse({
+          personName: person.display_name,
+          pollTitle: poll.title,
+          pollId: poll.id,
+          declined,
+          isFirstAnswer: !prior,
+          answered: answered ?? 0,
+          invited: invitedCount ?? 0,
+        }),
+      );
+    } catch (error) {
+      console.error("[push] notifying the host failed:", (error as Error).message);
+    }
+  });
 
   return NextResponse.json({ ok: true, saved: accepted.length });
 }

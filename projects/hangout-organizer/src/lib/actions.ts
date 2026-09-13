@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { newShareToken } from "@/lib/tokens";
-import { DAY_MINUTES, shiftDate } from "@/lib/slots";
+import { DAY_MINUTES, klToInstant, shiftDate } from "@/lib/slots";
 import type { Poll } from "@/lib/types";
 
 function str(form: FormData, key: string): string {
@@ -19,6 +19,22 @@ function optStr(form: FormData, key: string): string | null {
 function optNum(form: FormData, key: string): number | null {
   const v = str(form, key);
   return v === "" ? null : Number(v);
+}
+
+/**
+ * A `datetime-local` field submits wall-clock with no zone — "2026-09-18T20:00".
+ * Every other instant in this app is stored UTC and entered in Kuala Lumpur, so
+ * it has to be read as KL and not as whatever the server's clock happens to be.
+ * On Vercel that server is in Tokyo, which would have quietly moved every
+ * deadline an hour.
+ */
+function optInstant(form: FormData, key: string): string | null {
+  const value = str(form, key);
+  if (!value) return null;
+  const [date, time] = value.split("T");
+  if (!date || !time) return null;
+  const at = klToInstant(date, time.slice(0, 5));
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
 }
 
 // ---------------------------------------------------------------- roster ----
@@ -124,6 +140,14 @@ function validatePollForm(form: FormData): string | null {
     return "The 'poll until' date is before the 'poll from' date.";
   }
 
+  // A cut-off in the past would create a poll that is shut the instant it is
+  // shared — the link would open, show a closed notice, and take no answers,
+  // with nothing on the host's side explaining why.
+  const closesAt = optInstant(form, "closes_at");
+  if (closesAt && Date.parse(closesAt) <= Date.now()) {
+    return "That cut-off has already passed, so the poll would be closed before anyone saw it.";
+  }
+
   if (str(form, "granularity") === "date") {
     const days = Number(str(form, "date_full_days") || 1);
     if (!Number.isInteger(days) || days < 1) return "How many days must be a whole number, 1 or more.";
@@ -214,6 +238,7 @@ export async function createPoll(form: FormData) {
       slot_minutes: Number(str(form, "slot_minutes") || 60),
       granularity: str(form, "granularity") === "date" ? "date" : "time",
       group_id: groupId,
+      closes_at: optInstant(form, "closes_at"),
       notes: optStr(form, "notes"),
     })
     .select("id")
@@ -285,6 +310,24 @@ export async function updatePollNotes(form: FormData) {
   revalidatePath(`/polls/${id}`);
 }
 
+/**
+ * Set or clear the cut-off on a running poll.
+ *
+ * Separate from `setPollStatus` because they say different things: status is
+ * "I have decided", the cut-off is "I have announced". Clearing this reopens a
+ * poll that closed itself, without the host having to work out which of the two
+ * shut it.
+ */
+export async function updatePollDeadline(form: FormData) {
+  const supabase = await createClient();
+  const id = str(form, "id");
+  await supabase
+    .from("polls")
+    .update({ closes_at: optInstant(form, "closes_at") })
+    .eq("id", id);
+  revalidatePath(`/polls/${id}`);
+}
+
 export async function deletePoll(form: FormData) {
   const supabase = await createClient();
   await supabase.from("polls").delete().eq("id", str(form, "id"));
@@ -317,6 +360,12 @@ export async function duplicatePoll(form: FormData) {
       slot_minutes: original.slot_minutes,
       granularity: original.granularity,
       group_id: original.group_id,
+      // The deadline moves with the dates. A copy made for next week that kept
+      // last week's cut-off would be born closed — which is exactly the state
+      // validatePollForm refuses to create by hand.
+      closes_at: original.closes_at
+        ? new Date(Date.parse(original.closes_at) + shiftDays * 86_400_000).toISOString()
+        : null,
       notes: original.notes,
     })
     .select("id")
@@ -430,6 +479,9 @@ export async function confirmSession(form: FormData) {
       confirmed_start_at: str(form, "confirmed_start_at"),
       confirmed_duration_minutes: Number(str(form, "confirmed_duration_minutes")),
       venue_id: optStr(form, "venue_id"),
+      // Shown on the public page: the venue gets people to the building, this
+      // is what stops them standing in the lobby asking which court.
+      court_number: optStr(form, "court_number"),
     })
     .eq("id", id);
 
@@ -450,12 +502,38 @@ export async function confirmSession(form: FormData) {
   revalidatePath("/calendar");
 }
 
+/**
+ * Set or change the court on a booking that is already confirmed.
+ *
+ * Separate from `confirmSession` because of when it is known: plenty of venues
+ * confirm the slot first and allocate the court later, and the host should not
+ * have to unconfirm and reconfirm a booking — losing the attendee snapshot in
+ * the process — just to add a number everyone is waiting on.
+ */
+export async function updateSessionCourt(form: FormData) {
+  const supabase = await createClient();
+  const pollId = str(form, "poll_id");
+  await supabase
+    .from("sessions")
+    .update({ court_number: optStr(form, "court_number") })
+    .eq("id", str(form, "id"));
+  revalidatePath(`/polls/${pollId}`);
+  revalidatePath("/calendar");
+}
+
 export async function unconfirmSession(form: FormData) {
   const supabase = await createClient();
   const id = str(form, "id");
   await supabase
     .from("sessions")
-    .update({ status: "planning", confirmed_start_at: null, confirmed_duration_minutes: null })
+    .update({
+      status: "planning",
+      confirmed_start_at: null,
+      confirmed_duration_minutes: null,
+      // Belongs to the booking that was just undone. Left behind, it would be
+      // shown against whatever gets confirmed next.
+      court_number: null,
+    })
     .eq("id", id);
   await supabase.from("attendees").delete().eq("session_id", id);
   revalidatePath(`/polls/${str(form, "poll_id")}`);

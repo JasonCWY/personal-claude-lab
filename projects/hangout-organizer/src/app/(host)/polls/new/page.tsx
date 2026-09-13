@@ -67,6 +67,15 @@ export default async function NewPollPage({
           <AudiencePicker people={people} groups={groups} memberships={memberships} />
 
           <div className="sm:col-span-2">
+            <Field
+              label="Answer by (optional)"
+              hint="Malaysia time. After this the link stops taking answers and says so — which is the thing you would otherwise have to remember to do by hand. Leave it blank to keep the poll open until you close it."
+            >
+              <Input type="datetime-local" name="closes_at" />
+            </Field>
+          </div>
+
+          <div className="sm:col-span-2">
             <Field label="Notes">
               <Textarea name="notes" placeholder="Anything the group should know." />
             </Field>

@@ -4,6 +4,7 @@ import {
   computeSlotCounts,
   groupCandidates,
   groupResponders,
+  headcountOf,
   overlappingPeople,
   pendingResponders,
   type AvailabilityEntry,
@@ -394,5 +395,118 @@ describe("date polls reuse the engine unchanged", () => {
     const short = candidates.filter((c) => c.tier === "short");
     expect(short).toHaveLength(1);
     expect(short[0].headcount).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Party sizes (migration 010). A responder brings guests; the thresholds count
+// bodies on a court, not rows in a table.
+// ---------------------------------------------------------------------------
+describe("party sizes", () => {
+  it("defaults everyone to one, so existing polls score exactly as before", () => {
+    expect(headcountOf(["a", "b", "c"])).toBe(3);
+    expect(headcountOf(["a", "b"], { a: 1 })).toBe(2);
+  });
+
+  it("ignores a stored size that would make someone count for nothing", () => {
+    // These arrive from a public endpoint. A 0 must not erase a responder and
+    // a negative must not subtract from the group.
+    expect(headcountOf(["a"], { a: 0 })).toBe(1);
+    expect(headcountOf(["a"], { a: -4 })).toBe(1);
+    expect(headcountOf(["a"], { a: 2.7 })).toBe(2);
+    expect(headcountOf(["a"], { a: Number.NaN })).toBe(1);
+  });
+
+  it("lets guests carry a window over the full-tier threshold", () => {
+    // Four responders for two hours. Under the old row-counting rule this is
+    // a short session; two of them are bringing a friend, so it is really six
+    // players and a full two hours.
+    const four = ["a", "b", "c", "d"];
+    const availability = [
+      ...free("19:00", four),
+      ...free("19:30", four),
+      ...free("20:00", four),
+      ...free("20:30", four),
+    ];
+
+    const withoutGuests = computeCandidates(availability, BADMINTON, 30);
+    expect(withoutGuests.every((c) => c.tier === "short")).toBe(true);
+
+    const withGuests = computeCandidates(availability, BADMINTON, 30, { a: 2, b: 2 });
+    const full = withGuests.filter((c) => c.tier === "full");
+    expect(full.length).toBeGreaterThan(0);
+    expect(full[0].headcount).toBe(6);
+    // The window is still carried by four PEOPLE; only the headcount grew.
+    expect(full[0].people).toEqual(four);
+  });
+
+  it("does not let a guest fill a window its host is not free for", () => {
+    // The invariant this module exists for, restated with guests: a party
+    // counts only where the person who brings it is free for the whole window.
+    const availability = [
+      ...free("19:00", ["a", "b", "c", "d"]),
+      ...free("19:30", ["a", "b", "c"]),
+      ...free("20:00", ["a", "b", "c", "d"]),
+      ...free("20:30", ["a", "b", "c", "d"]),
+    ];
+    const candidates = computeCandidates(availability, BADMINTON, 30, { d: 5 });
+    for (const c of candidates) {
+      if (c.people.includes("d")) {
+        expect(c.start.getTime()).toBeGreaterThanOrEqual(klToInstant(DAY, "20:00").getTime());
+      }
+    }
+  });
+
+  it("keeps the early exit from discarding a window guests do fill", () => {
+    // Regression guard for the intersection loop: it used to stop as soon as
+    // the PEOPLE count fell below the threshold, which with party sizes would
+    // throw away a window that is genuinely full.
+    const two = ["a", "b"];
+    const availability = [
+      ...free("19:00", ["a", "b", "c"]),
+      ...free("19:30", two),
+      ...free("20:00", two),
+      ...free("20:30", two),
+    ];
+    const candidates = computeCandidates(availability, BADMINTON, 30, { a: 3, b: 3 });
+    const full = candidates.filter((c) => c.tier === "full");
+    expect(full.length).toBeGreaterThan(0);
+    expect(full[0].headcount).toBe(6);
+  });
+
+  it("weighs blocks by party size when merging", () => {
+    const three = ["a", "b", "c"];
+    const availability = [
+      ...free("19:00", three),
+      ...free("19:30", three),
+      ...free("20:00", three),
+      ...free("20:30", three),
+      ...free("21:00", three),
+    ];
+    const sizes = { a: 2, b: 2, c: 2 };
+    const blocks = groupCandidates(computeCandidates(availability, BADMINTON, 30, sizes), sizes);
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks[0].headcount).toBe(6);
+    expect(blocks[0].people).toEqual(three);
+  });
+
+  it("never merges two different groups that merely sum to the same headcount", () => {
+    // a+b (2 bodies each) and c (4 bodies) both weigh 4. They are not the same
+    // people, so they must not collapse into one block.
+    const availability = [
+      ...free("19:00", ["a", "b"]),
+      ...free("19:30", ["a", "b"]),
+      ...free("20:00", ["c"]),
+      ...free("20:30", ["c"]),
+    ];
+    const sizes = { a: 2, b: 2, c: 4 };
+    const rules = { ...BADMINTON, minPlayersShort: 4, shortDurationMinutes: 60 };
+    const blocks = groupCandidates(computeCandidates(availability, rules, 30, sizes), sizes);
+    for (const block of blocks) {
+      expect(new Set(block.people).size).toBe(block.people.length);
+      expect(block.headcount).toBe(headcountOf(block.people, sizes));
+    }
+    // Two separate groups -> two separate blocks, never one merged four-body one.
+    expect(blocks.some((b) => b.people.includes("a") && b.people.includes("c"))).toBe(false);
   });
 });

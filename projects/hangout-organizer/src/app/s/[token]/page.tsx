@@ -9,8 +9,10 @@ import {
   formatDateSpan,
   formatDays,
   formatDuration,
+  formatKl,
   formatSpan,
 } from "@/lib/slots";
+import { formatTimeLeft, pollClosedReason } from "@/lib/poll-state";
 import type {
   AvailabilityRow,
   GameSession,
@@ -18,6 +20,7 @@ import type {
   Poll,
   PollResponse,
   SessionOptOut,
+  Venue,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -106,25 +109,30 @@ export default async function PublicPollPage({
   ] = await Promise.all([
     supabase.from("poll_invitees").select("person_id").eq("poll_id", poll.id),
     supabase.from("availability").select("person_id, slot_start").eq("poll_id", poll.id),
-    supabase.from("poll_responses").select("person_id, declined").eq("poll_id", poll.id),
+    supabase
+      .from("poll_responses")
+      .select("person_id, declined, party_size")
+      .eq("poll_id", poll.id),
     supabase.from("sessions").select("*").eq("poll_id", poll.id).order("created_at"),
   ]);
 
   const inviteeIds = (inviteeData ?? []).map((r) => r.person_id as string);
   const sessions = (sessionData ?? []) as GameSession[];
+  const booked = sessions.filter((s) => s.status === "confirmed" && s.confirmed_start_at);
+  const bookedVenueIds = [...new Set(booked.map((s) => s.venue_id).filter(Boolean))] as string[];
 
   // The roster and the opt-outs each need an ID list from the wave above, but
   // not from each other — so they go out together rather than one after the
   // other. This is the friend-facing page, opened from a phone on mobile data,
   // where every avoidable round trip is felt.
-  const [{ data: peopleData }, { data: optOutData }] = await Promise.all([
+  const [{ data: peopleData }, { data: optOutData }, { data: attendeeData }, { data: venueData }] =
+    await Promise.all([
+    // Deliberately NOT filtered to active people. The form needs the active
+    // ones, but the attendee list below has to be able to name someone who was
+    // deactivated after the booking was confirmed — otherwise they vanish from
+    // a list they are still turning up to. One query, filtered twice below.
     inviteeIds.length
-      ? supabase
-          .from("people")
-          .select("*")
-          .in("id", inviteeIds)
-          .eq("is_active", true)
-          .order("display_name")
+      ? supabase.from("people").select("*").in("id", inviteeIds).order("display_name")
       : Promise.resolve({ data: [] as Person[] }),
     // Which activities each person has said they are not up for, so returning
     // to the link shows their previous answer rather than resetting it.
@@ -137,9 +145,36 @@ export default async function PublicPollPage({
             sessions.map((s) => s.id),
           )
       : Promise.resolve({ data: [] as SessionOptOut[] }),
+    // Who the host snapshotted as coming when they confirmed. Both of these
+    // ride in this wave rather than a third one — the friend-facing page is
+    // opened on mobile data and every avoidable round trip is felt.
+    booked.length
+      ? supabase
+          .from("attendees")
+          .select("session_id, person_id")
+          .in(
+            "session_id",
+            booked.map((s) => s.id),
+          )
+      : Promise.resolve({ data: [] as { session_id: string; person_id: string }[] }),
+    bookedVenueIds.length
+      ? supabase.from("venues").select("*").in("id", bookedVenueIds)
+      : Promise.resolve({ data: [] as Venue[] }),
   ]);
 
-  const roster = (peopleData ?? []) as Person[];
+  const invitees = (peopleData ?? []) as Person[];
+  // The form only ever offers, and the route only ever accepts, active people.
+  const roster = invitees.filter((p) => p.is_active);
+  const nameById = new Map(invitees.map((p) => [p.id, p.display_name]));
+  const venueById = new Map(((venueData ?? []) as Venue[]).map((v) => [v.id, v]));
+
+  const attendeesBySession = new Map<string, string[]>();
+  for (const row of (attendeeData ?? []) as { session_id: string; person_id: string }[]) {
+    attendeesBySession.set(row.session_id, [
+      ...(attendeesBySession.get(row.session_id) ?? []),
+      row.person_id,
+    ]);
+  }
 
   const existing: Record<string, number[]> = {};
   for (const row of (availabilityData ?? []) as AvailabilityRow[]) {
@@ -150,6 +185,11 @@ export default async function PublicPollPage({
   // that back rather than a blank grid that looks like they never answered.
   const responses = (responseData ?? []) as PollResponse[];
   const declinedIds = responses.filter((r) => r.declined).map((r) => r.person_id);
+
+  // Reopening the link has to show back what you said last time, guest count
+  // included — otherwise editing a note silently resets your party to one.
+  const existingPartySizes: Record<string, number> = {};
+  for (const r of responses) existingPartySizes[r.person_id] = r.party_size ?? 1;
 
   const existingOptOuts: Record<string, string[]> = {};
   for (const row of (optOutData ?? []) as SessionOptOut[]) {
@@ -167,8 +207,12 @@ export default async function PublicPollPage({
     slotMinutes: poll.slot_minutes,
   };
 
-  const closed = poll.status !== "polling";
-  const booked = sessions.filter((s) => s.status === "confirmed" && s.confirmed_start_at);
+  // One source of truth with the submit route: a poll past its cut-off is shut
+  // here and shut there, and the page never invites an answer the endpoint is
+  // about to refuse.
+  const closedReason = pollClosedReason(poll);
+  const closed = closedReason !== null;
+  const timeLeft = formatTimeLeft(poll);
 
   return (
     <main className="mx-auto min-h-dvh max-w-2xl px-4 py-6">
@@ -209,27 +253,98 @@ export default async function PublicPollPage({
 
       {poll.notes && <p className="mt-3 text-sm text-ink-muted">{poll.notes}</p>}
 
+      {!closed && timeLeft && (
+        <p className="mt-3 rounded-lg border border-warn-border bg-warn-bg p-3 text-sm text-warn-fg">
+          Answer within about {timeLeft} — this poll closes on {formatKl(new Date(poll.closes_at!))}
+          , after which the link stops taking answers.
+        </p>
+      )}
+
       <div className="mt-6 rounded-xl border border-line bg-surface p-4 shadow-sm">
         {closed ? (
           <div>
-            <h2 className="font-medium">This poll is closed.</h2>
+            <h2 className="font-medium">
+              {closedReason === "cut-off"
+                ? "Answering has closed."
+                : "This poll is closed."}
+            </h2>
+            {closedReason === "cut-off" && booked.length === 0 && (
+              <p className="mt-1 text-sm text-ink-soft">
+                The deadline was {formatKl(new Date(poll.closes_at!))}.
+              </p>
+            )}
             {booked.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-sm text-ink-muted">
-                {booked.map((s) => (
-                  <li key={s.id}>
-                    <strong>{s.title}</strong> —{" "}
-                    {byDate
-                      ? formatDateSpan(
-                          new Date(s.confirmed_start_at!),
-                          s.confirmed_duration_minutes ?? 0,
-                        )
-                      : formatSpan(
-                          new Date(s.confirmed_start_at!),
-                          s.confirmed_duration_minutes ?? 0,
-                        )}
-                  </li>
-                ))}
-              </ul>
+              /*
+               * The point of the page after a booking is made. Until now it
+               * said only the title and the time, which is the half of it
+               * everyone already knew from the group chat — the questions
+               * actually asked on the day are "where", "which court" and "who
+               * else is coming", and the host was answering all three by hand.
+               */
+              <div className="mt-3 space-y-3">
+                {booked.map((s) => {
+                  const venue = s.venue_id ? venueById.get(s.venue_id) : undefined;
+                  const going = (attendeesBySession.get(s.id) ?? [])
+                    .map((id) => nameById.get(id))
+                    .filter(Boolean)
+                    .sort() as string[];
+                  return (
+                    <div key={s.id} className="rounded-xl border border-ok-border bg-ok-bg p-3">
+                      <p className="font-medium text-ok-fg">{s.title}</p>
+                      <p className="mt-0.5 text-sm text-ok-fg">
+                        {byDate
+                          ? formatDateSpan(
+                              new Date(s.confirmed_start_at!),
+                              s.confirmed_duration_minutes ?? 0,
+                            )
+                          : formatSpan(
+                              new Date(s.confirmed_start_at!),
+                              s.confirmed_duration_minutes ?? 0,
+                            )}
+                      </p>
+
+                      {(venue || s.court_number) && (
+                        <p className="mt-2 text-sm text-ink-muted">
+                          {venue && <span className="font-medium text-ink">{venue.name}</span>}
+                          {venue && s.court_number ? " · " : ""}
+                          {s.court_number && (
+                            <span className="font-medium text-ink">Court {s.court_number}</span>
+                          )}
+                          {venue?.address && (
+                            <span className="mt-0.5 block text-xs text-ink-soft">
+                              {venue.address}
+                            </span>
+                          )}
+                        </p>
+                      )}
+
+                      {going.length > 0 && (
+                        <p className="mt-2 text-sm text-ink-muted">
+                          <span className="text-xs uppercase tracking-wide text-ink-soft">
+                            Going
+                          </span>
+                          <span className="mt-0.5 block">
+                            {going.join(", ")}
+                            {/* Guests were counted into the booking, so they
+                                are counted into the list of who to expect. */}
+                            {(() => {
+                              const guests = (attendeesBySession.get(s.id) ?? []).reduce(
+                                (n, id) => n + Math.max(0, (existingPartySizes[id] ?? 1) - 1),
+                                0,
+                              );
+                              return guests > 0
+                                ? ` + ${guests} guest${guests === 1 ? "" : "s"}`
+                                : "";
+                            })()}
+                          </span>
+                        </p>
+                      )}
+
+                      {s.notes && <p className="mt-2 text-sm text-ink-muted">{s.notes}</p>}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <p className="mt-2 text-sm text-ink-muted">Ask the host for details.</p>
             )}
@@ -244,6 +359,7 @@ export default async function PublicPollPage({
             declinedIds={declinedIds}
             sessions={sessions}
             existingOptOuts={existingOptOuts}
+            existingPartySizes={existingPartySizes}
           />
         )}
       </div>

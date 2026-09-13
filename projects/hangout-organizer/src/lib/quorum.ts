@@ -16,8 +16,39 @@ export interface AvailabilityEntry {
   slotStart: Date;
 }
 
+/**
+ * How many people each responder is bringing, including themselves.
+ *
+ * Absent, or absent for a given person, means one. That default is what keeps
+ * every caller that does not care about guests — and every poll answered before
+ * migration 010 — scoring exactly as it did before.
+ */
+export type PartySizes = Readonly<Record<string, number>>;
+
+/**
+ * Bodies, not rows.
+ *
+ * The distinction this whole module now turns on: six responders where two are
+ * bringing a friend is eight players, and booking a court for six was simply
+ * the wrong answer. A thresholds like `minPlayersFull` was always talking about
+ * people on a court; until party sizes existed, rows happened to be the same
+ * number.
+ *
+ * Guards against a nonsensical stored value rather than trusting the column —
+ * this arrives from a public endpoint, and a zero or a negative here would
+ * quietly make someone count for nothing or subtract from the group.
+ */
+export function headcountOf(people: Iterable<string>, partySizes?: PartySizes): number {
+  let total = 0;
+  for (const person of people) {
+    const size = partySizes?.[person];
+    total += typeof size === "number" && Number.isFinite(size) && size >= 1 ? Math.floor(size) : 1;
+  }
+  return total;
+}
+
 export interface QuorumRules {
-  /** Ideal headcount, e.g. 6 for badminton. */
+  /** Ideal headcount, e.g. 6 for badminton. Bodies, not responders. */
   minPlayersFull: number;
   /** Duration to book when the ideal headcount turns up, e.g. 120. */
   fullDurationMinutes: number;
@@ -36,6 +67,11 @@ export interface Candidate {
   tier: QuorumTier;
   /** Everyone free for the ENTIRE window, sorted for stable output. */
   people: string[];
+  /**
+   * Bodies across that window: the sum of those people's party sizes, which is
+   * `people.length` only when nobody is bringing anyone. This is the number
+   * compared against the quorum thresholds, and the number to show a host.
+   */
   headcount: number;
 }
 
@@ -76,6 +112,7 @@ export function computeCandidates(
   availability: AvailabilityEntry[],
   rules: QuorumRules,
   slotMinutes: number,
+  partySizes?: PartySizes,
 ): Candidate[] {
   if (slotMinutes <= 0) return [];
 
@@ -121,12 +158,20 @@ export function computeCandidates(
       if (!contiguous) continue;
 
       // Intersect the people free across every slot in the window.
+      //
+      // The loop gives up early once the quorum can no longer be met, which is
+      // sound because an intersection only ever shrinks and so its headcount
+      // only ever falls. That test has to weigh the set rather than count it:
+      // with party sizes, `people.size` understates the headcount, and
+      // stopping on the count would discard windows that four responders
+      // bringing friends genuinely do fill.
       let people = new Set(bySlot.get(startKey));
-      for (let k = 1; k < slotsNeeded && people.size >= minPlayers; k++) {
+      for (let k = 1; k < slotsNeeded && headcountOf(people, partySizes) >= minPlayers; k++) {
         const next = new Set(bySlot.get(slotKeys[i + k]));
         people = new Set([...people].filter((p) => next.has(p)));
       }
-      if (people.size < minPlayers) continue;
+      const headcount = headcountOf(people, partySizes);
+      if (headcount < minPlayers) continue;
 
       const candidate: Candidate = {
         start: new Date(startKey),
@@ -134,7 +179,7 @@ export function computeCandidates(
         durationMinutes: duration,
         tier,
         people: [...people].sort(),
-        headcount: people.size,
+        headcount,
       };
       (tier === "full" ? full : short).push(candidate);
     }
@@ -224,7 +269,7 @@ export interface CandidateBlock {
   tier: QuorumTier;
   /** People free across the ENTIRE block. */
   people: string[];
-  /** Best headcount available within the block. */
+  /** Bodies sustained across the block — party sizes included. */
   headcount: number;
 }
 
@@ -235,7 +280,10 @@ export interface CandidateBlock {
  * so a block never claims a headcount nobody sustains. Ranking matches
  * computeCandidates: full before short, then headcount, then earliest.
  */
-export function groupCandidates(candidates: Candidate[]): CandidateBlock[] {
+export function groupCandidates(
+  candidates: Candidate[],
+  partySizes?: PartySizes,
+): CandidateBlock[] {
   const blocks: CandidateBlock[] = [];
 
   for (const key of [...new Set(candidates.map((c) => `${c.tier}|${c.durationMinutes}`))]) {
@@ -252,16 +300,22 @@ export function groupCandidates(candidates: Candidate[]): CandidateBlock[] {
 
       // Merge only while contiguous AND the same people hold the whole span —
       // otherwise the block would advertise a headcount that never existed.
+      //
+      // The test is deliberately on people COUNTS, not headcounts: what it is
+      // asking is whether one group is simply a subset of the other, and that
+      // is a question about the sets themselves. Comparing party-weighted
+      // headcounts here would let two different groups that happen to sum to
+      // the same number merge into a block neither of them sustains.
       if (
         current &&
         c.start.getTime() <= current.end.getTime() &&
         sustained.length >= 1 &&
-        sustained.length === Math.min(current.headcount, c.headcount)
+        sustained.length === Math.min(current.people.length, c.people.length)
       ) {
         current.end = new Date(Math.max(current.end.getTime(), c.end.getTime()));
         current.starts.push(c.start);
         current.people = sustained;
-        current.headcount = sustained.length;
+        current.headcount = headcountOf(sustained, partySizes);
         continue;
       }
 
