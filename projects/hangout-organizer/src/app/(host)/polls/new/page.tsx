@@ -3,7 +3,6 @@ import { createPoll } from "@/lib/actions";
 import { Button, Card, ErrorBanner, Field, Input, PageHeader, Textarea } from "@/components/ui";
 import { AudiencePicker } from "@/components/AudiencePicker";
 import { PollShapeFields } from "@/components/PollShapeFields";
-import { defaultPollRange } from "@/lib/slots";
 import type { Person, RosterGroup, Sport, Venue } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,13 +35,11 @@ export default async function NewPollPage({
     memberships[gid] = [...(memberships[gid] ?? []), m.person_id as string];
   }
 
-  const range = defaultPollRange();
-
   return (
     <>
       <PageHeader
         title="New poll"
-        subtitle="Ask once about a window of time, then work out what can be booked in it. One link, however many activities."
+        subtitle="Pick the dates and the hours on each of them, then work out what can be booked. One link, however many activities."
       />
 
       <ErrorBanner message={error} />
@@ -54,13 +51,6 @@ export default async function NewPollPage({
               <Input name="title" placeholder="e.g. Sports next week" />
             </Field>
           </div>
-
-          <Field label="Poll from">
-            <Input type="date" name="poll_start_date" required defaultValue={range.start} />
-          </Field>
-          <Field label="Poll until">
-            <Input type="date" name="poll_end_date" required defaultValue={range.end} />
-          </Field>
 
           <PollShapeFields sports={sports} venues={venues} />
 

@@ -1,32 +1,31 @@
-import { buildSlotGrid, formatDayHeader, formatSlotRange } from "@/lib/slots";
+import { buildSlotGrid, formatDayHeader } from "@/lib/slots";
+import type { SlotGridSpec } from "@/lib/slots";
 import type { Person } from "@/lib/types";
 
 /**
  * Host-facing density view: darker cell = more people free in that slot.
  *
  * This shows PER-SLOT counts, which is not the same question as "can we book a
- * two-hour block" — that is what QuorumSlots answers. Both are shown because a
- * dark column with no qualifying window is a real and confusing state, and the
- * heatmap is what makes it legible.
+ * two-hour block" — that is what BookableBlocks answers. Both are shown because
+ * a dark column with no qualifying window is a real and confusing state, and
+ * the heatmap is what makes it legible.
+ *
+ * Laid out per date, matching the friend-facing grid: there is no shared time
+ * axis any more, so each cell carries its own time and a break between two
+ * windows on one date is drawn rather than implied.
  */
 export function HeatmapGrid({
   spec,
   slotCounts,
   roster,
 }: {
-  spec: {
-    pollStartDate: string;
-    pollEndDate: string;
-    granularity?: "time" | "date";
-    dayStartTime: string;
-    dayEndTime: string;
-    slotMinutes: number;
-  };
+  spec: SlotGridSpec;
   slotCounts: Map<number, string[]>;
   roster: Person[];
 }) {
-  const { days, times, grid } = buildSlotGrid(spec);
+  const { columns, rows } = buildSlotGrid(spec);
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
+  const byDate = spec.granularity === "date";
 
   const max = Math.max(1, ...[...slotCounts.values()].map((v) => v.length));
 
@@ -42,18 +41,21 @@ export function HeatmapGrid({
     return "bg-heat-4 text-heat-fg";
   }
 
+  if (columns.length === 0) {
+    return <p className="text-sm text-ink-soft">This poll has no dates on it.</p>;
+  }
+
   return (
     <div className="-mx-1 scroll-x px-1">
       <table className="min-w-full border-separate border-spacing-0.5 text-center text-xs">
         <thead>
           <tr>
-            {/* See AvailabilityGrid: w-px collapses the label column. */}
-            <th className="sticky left-0 w-px bg-surface px-2 py-1" />
-            {days.map((day, i) => {
-              const { weekday, dayOfMonth, month } = formatDayHeader(day);
-              const showMonth = i === 0 || formatDayHeader(days[i - 1]).month !== month;
+            {columns.map((column, i) => {
+              const { weekday, dayOfMonth, month } = formatDayHeader(column.date);
+              const showMonth =
+                i === 0 || formatDayHeader(columns[i - 1].date).month !== month;
               return (
-                <th key={day} className="px-2 py-1 font-medium text-ink-muted">
+                <th key={column.date} className="px-2 py-1 font-medium text-ink-muted">
                   <div className="text-[0.7rem] uppercase tracking-wide text-ink-faint">
                     {weekday}
                   </div>
@@ -71,31 +73,49 @@ export function HeatmapGrid({
           </tr>
         </thead>
         <tbody>
-          {times.map((time, ti) => (
-            <tr key={time}>
-              <th className="sticky left-0 w-px whitespace-nowrap bg-surface px-2 py-1 text-right font-normal tabular-nums text-ink-soft">
-                <span className="text-[0.7rem]">
-                  {spec.granularity === "date"
-                    ? "free"
-                    : formatSlotRange(time, spec.slotMinutes)}
-                </span>
-              </th>
-              {days.map((day, di) => {
-                const people = slotCounts.get(grid[ti][di].getTime()) ?? [];
+          {Array.from({ length: rows }, (_, ri) => (
+            <tr key={ri}>
+              {columns.map((column) => {
+                const cell = column.cells[ri];
+
+                if (cell.kind === "pad") {
+                  return <td key={column.date} className="p-0" />;
+                }
+
+                if (cell.kind === "gap") {
+                  return (
+                    <td key={column.date} className="p-0">
+                      <div aria-hidden="true" className="flex h-5 items-center justify-center">
+                        <span className="h-px w-full border-t border-dashed border-line-strong" />
+                      </div>
+                    </td>
+                  );
+                }
+
+                const people = slotCounts.get(cell.start.getTime()) ?? [];
                 return (
                   <td
-                    key={day}
-                    title={`${
-                      spec.granularity === "date"
-                        ? day
-                        : formatSlotRange(time, spec.slotMinutes)
-                    } — ${
+                    key={column.date}
+                    title={`${byDate ? column.date : `${column.date} ${cell.label}`} — ${
                       people.length
                         ? people.map((id) => names.get(id) ?? id).join(", ")
                         : "nobody free"
                     }`}
-                    className={`h-9 min-w-[2.75rem] rounded font-medium sm:h-8 ${shade(people.length)}`}
+                    className={`h-11 min-w-[4.5rem] rounded align-middle font-medium sm:h-9 ${shade(
+                      people.length,
+                    )}`}
                   >
+                    {/* Same range treatment as the friend grid — see there. */}
+                    <span className="block text-[0.65rem] font-normal leading-none opacity-80">
+                      {byDate ? (
+                        "free"
+                      ) : (
+                        <>
+                          {cell.time}
+                          <span className="opacity-65">–{cell.endTime}</span>
+                        </>
+                      )}
+                    </span>
                     {people.length || ""}
                   </td>
                 );
@@ -104,9 +124,9 @@ export function HeatmapGrid({
           ))}
         </tbody>
       </table>
-      {days.length > 4 && (
+      {columns.length > 3 && (
         <p className="mt-2 text-center text-xs text-ink-faint sm:hidden">
-          Swipe sideways for the rest of the days.
+          Swipe sideways for the rest of the dates.
         </p>
       )}
     </div>

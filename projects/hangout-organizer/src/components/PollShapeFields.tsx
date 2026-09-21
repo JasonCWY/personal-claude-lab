@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PollDatePicker } from "@/components/PollDatePicker";
 import type { Sport, Venue } from "@/lib/types";
 
 /**
@@ -51,33 +52,15 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
         </div>
       </div>
 
+      {/*
+        The dates and their windows, for both shapes. A date poll picks the
+        same way and simply asks no times — so there is one calendar in this
+        form rather than a range for one shape and a picker for the other.
+      */}
+      <PollDatePicker byDate={shape === "date"} />
+
       {shape === "time" ? (
         <>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink-muted">Earliest start</label>
-            <input
-              type="time"
-              name="day_start_time"
-              required
-              defaultValue="18:00"
-              step={900}
-              className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink-muted">Latest end</label>
-            <input
-              type="time"
-              name="day_end_time"
-              required
-              defaultValue="22:00"
-              step={900}
-              className="w-full min-h-tap rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
-            />
-            <p className="mt-1 text-xs text-ink-soft">
-              00:00 means the end of that evening. Past midnight is fine.
-            </p>
-          </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-ink-muted">Slot size</label>
             <select
@@ -89,6 +72,7 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
               <option value="30">30 minutes</option>
             </select>
             <p className="mt-1 text-xs text-ink-soft">
+              One size for the whole poll — the scheduling engine measures every window in these.
               Coarser slots mean less to tap on a phone, and courts book by the hour anyway.
             </p>
           </div>
@@ -163,8 +147,6 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
         </>
       ) : (
         <div className="sm:col-span-2">
-          <input type="hidden" name="day_start_time" value="00:00" />
-          <input type="hidden" name="day_end_time" value="00:00" />
           <input type="hidden" name="slot_minutes" value="1440" />
 
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-soft">
@@ -229,7 +211,8 @@ export function PollShapeFields({ sports, venues }: { sports: Sport[]; venues: V
           </div>
           <p className="mt-2 text-xs text-ink-soft">
             The app looks for runs of consecutive days that the same people are all free for — the
-            same rule as the hourly polls, with a day-sized slot.
+            same rule as the hourly polls, with a day-sized slot. A date you skip is a real break
+            in the run, so a 3-day trip needs three dates in a row.
           </p>
         </div>
       )}

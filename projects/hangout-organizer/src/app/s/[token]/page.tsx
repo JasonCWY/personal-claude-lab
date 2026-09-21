@@ -5,12 +5,14 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { PollForm } from "@/components/PollForm";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
-  formatDateRange,
+  formatDateList,
   formatDateSpan,
   formatDays,
   formatDuration,
   formatKl,
   formatSpan,
+  pollDates,
+  windowsFromRows,
 } from "@/lib/slots";
 import { formatTimeLeft, pollClosedReason } from "@/lib/poll-state";
 import type {
@@ -42,6 +44,28 @@ const getPoll = cache(async (token: string) => {
 });
 
 /**
+ * The dates and hours this poll asks about.
+ *
+ * Cached for the same reason as the poll itself: the link preview needs the
+ * dates to say what it is inviting people to, and so does the page, and a
+ * second look-up would be another Tokyo round trip on the one page in this app
+ * that is opened on mobile data by someone who has never seen it.
+ */
+const getWindows = cache(async (pollId: string) => {
+  const { data } = await createServiceClient()
+    .from("poll_windows")
+    .select("day_date, start_time, end_time")
+    .eq("poll_id", pollId)
+    .order("day_date")
+    .order("start_time");
+  return (data ?? []) as {
+    day_date: string;
+    start_time: string | null;
+    end_time: string | null;
+  }[];
+});
+
+/**
  * What WhatsApp shows when the host pastes the link.
  *
  * Every share link used to unfurl as "Hangout Organizer" with the app's generic
@@ -58,13 +82,11 @@ export async function generateMetadata({
   const poll = await getPoll(token);
   if (!poll) return { title: "Poll not found" };
 
-  const when =
-    poll.granularity === "date"
-      ? formatDateRange(poll.poll_start_date, poll.poll_end_date)
-      : `${formatDateRange(poll.poll_start_date, poll.poll_end_date)}, ${poll.day_start_time.slice(
-          0,
-          5,
-        )}–${poll.day_end_time.slice(0, 5)}`;
+  // The dates this poll actually asks about, not its outer bounds: three
+  // scattered Tuesdays must not unfurl as a fortnight-long range in WhatsApp,
+  // which is where this link is read before anyone taps it.
+  const windows = await getWindows(poll.id);
+  const when = formatDateList(pollDates(windowsFromRows(windows)));
 
   const title =
     poll.status === "polling" ? `${poll.title} — when are you free?` : poll.title;
@@ -198,13 +220,11 @@ export default async function PublicPollPage({
 
   const byDate = poll.granularity === 'date';
 
+  const windows = windowsFromRows(await getWindows(poll.id));
   const spec = {
-    pollStartDate: poll.poll_start_date,
-    pollEndDate: poll.poll_end_date,
     granularity: poll.granularity,
-    dayStartTime: poll.day_start_time,
-    dayEndTime: poll.day_end_time,
     slotMinutes: poll.slot_minutes,
+    windows,
   };
 
   // One source of truth with the submit route: a poll past its cut-off is shut
@@ -225,8 +245,7 @@ export default async function PublicPollPage({
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">{poll.title}</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            {formatDateRange(poll.poll_start_date, poll.poll_end_date)}
-            {byDate ? "" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`}
+            {formatDateList(pollDates(windows))}
           </p>
         </div>
         <ThemeToggle className="hidden shrink-0 sm:flex" />

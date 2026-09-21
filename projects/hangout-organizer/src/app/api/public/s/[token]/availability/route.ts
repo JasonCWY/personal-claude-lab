@@ -3,7 +3,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { sendHostPush } from "@/lib/push";
 import { describeResponse } from "@/lib/push-message";
 import { pollClosedReason } from "@/lib/poll-state";
-import { buildSlotGrid } from "@/lib/slots";
+import { buildSlotGrid, windowsFromRows } from "@/lib/slots";
 import type { Poll } from "@/lib/types";
 
 const MAX_SLOTS = 2000;
@@ -108,8 +108,13 @@ export async function POST(
   // ride along here rather than costing their own round trips. `prior` is also
   // the only chance to tell a new answer from a correction: the upsert below
   // destroys that distinction.
-  const [{ data: invited }, { data: person }, { data: pollSessions }, { data: prior }] =
-    await Promise.all([
+  const [
+    { data: invited },
+    { data: person },
+    { data: pollSessions },
+    { data: prior },
+    { data: windowRows },
+  ] = await Promise.all([
       supabase
         .from("poll_invitees")
         .select("person_id")
@@ -129,6 +134,13 @@ export async function POST(
         .eq("poll_id", poll.id)
         .eq("person_id", personId)
         .maybeSingle(),
+      // The polled set, re-derived here rather than trusted from the client —
+      // this is check 4 below, and it is the only thing standing between a
+      // crafted body and availability outside the poll.
+      supabase
+        .from("poll_windows")
+        .select("day_date, start_time, end_time")
+        .eq("poll_id", poll.id),
     ]);
   if (!invited) {
     return NextResponse.json({ error: "You were not asked to this one" }, { status: 403 });
@@ -137,16 +149,23 @@ export async function POST(
     return NextResponse.json({ error: "Not on this roster" }, { status: 403 });
   }
 
+  // Dates now carry their own windows, so the valid set is no longer a
+  // rectangle that can be recomputed from two times — it is whatever the
+  // host's windows expand to. `slots` is exactly that, deduped and flattened
+  // by the same function the grid renders from, so the page and the endpoint
+  // cannot disagree about what was offered.
   const valid = new Set(
     buildSlotGrid({
-      pollStartDate: poll.poll_start_date,
-      pollEndDate: poll.poll_end_date,
-      dayStartTime: poll.day_start_time,
-      dayEndTime: poll.day_end_time,
+      granularity: poll.granularity,
       slotMinutes: poll.slot_minutes,
-    })
-      .grid.flat()
-      .map((d) => d.getTime()),
+      windows: windowsFromRows(
+        (windowRows ?? []) as {
+          day_date: string;
+          start_time: string | null;
+          end_time: string | null;
+        }[],
+      ),
+    }).slots.map((d) => d.getTime()),
   );
 
   const accepted = [...new Set(slots.map((s) => new Date(s).getTime()))].filter(

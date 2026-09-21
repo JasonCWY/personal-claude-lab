@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { newShareToken } from "@/lib/tokens";
 import { DAY_MINUTES, klToInstant, shiftDate } from "@/lib/slots";
+import { parseWindows, validateWindows } from "@/lib/poll-windows";
 import type { Poll } from "@/lib/types";
 
 function str(form: FormData, key: string): string {
@@ -131,14 +132,25 @@ export async function deleteGroup(form: FormData) {
 
 /**
  * Mirror the DB's CHECK constraints so the host gets a sentence rather than a
- * form that silently does nothing. Keep in step with the `polls_*` constraints.
+ * form that silently does nothing.
+ *
+ * The date/window half lives in `lib/poll-windows.ts` — pure, and tested — so
+ * that the gate on the shape of `poll_windows` is not stuck inside a
+ * `"use server"` module where nothing can reach it. What stays here is the
+ * part that genuinely reads FormData.
  */
 function validatePollForm(form: FormData): string | null {
-  const startDate = str(form, "poll_start_date");
-  const endDate = str(form, "poll_end_date");
-  if (endDate < startDate) {
-    return "The 'poll until' date is before the 'poll from' date.";
+  const windows = parseWindows(str(form, "windows"));
+  if (windows === null) {
+    return "Could not read the dates you picked. Reload the page and try again.";
   }
+
+  const byDate = str(form, "granularity") === "date";
+  const problem = validateWindows(windows, {
+    byDate,
+    fullDays: Number(str(form, "date_full_days") || 1),
+  });
+  if (problem) return problem;
 
   // A cut-off in the past would create a poll that is shut the instant it is
   // shared — the link would open, show a closed notice, and take no answers,
@@ -148,27 +160,11 @@ function validatePollForm(form: FormData): string | null {
     return "That cut-off has already passed, so the poll would be closed before anyone saw it.";
   }
 
-  if (str(form, "granularity") === "date") {
-    const days = Number(str(form, "date_full_days") || 1);
-    if (!Number.isInteger(days) || days < 1) return "How many days must be a whole number, 1 or more.";
-    // Asking for a 5-day run inside a 3-day window can never succeed, and
-    // failing here is clearer than an empty results page later.
-    const windowDays =
-      Math.round(
-        (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000,
-      ) + 1;
-    if (days > windowDays) {
-      return `You are asking for ${days} consecutive days but only polling ${windowDays}. Widen the dates, or ask for fewer days.`;
-    }
+  if (byDate) {
     if (!str(form, "date_activity_title")) return "Give the trip a name.";
     return null;
   }
 
-  // An end at or before the start means the next day, so 22:00–00:00 is valid.
-  // Only equality is wrong: that would be a 24-hour window.
-  if (str(form, "day_end_time") === str(form, "day_start_time")) {
-    return "The earliest start and latest end are the same time.";
-  }
   const slot = Number(str(form, "slot_minutes") || 60);
   if (![30, 60].includes(slot)) {
     return "Slot size must be 30 or 60 minutes.";
@@ -226,17 +222,23 @@ export async function createPoll(form: FormData) {
     );
   }
 
+  const byDate = str(form, "granularity") === "date";
+  // Already validated above; the non-null assertion is safe and re-parsing is
+  // cheaper than threading the result through the redirect path.
+  const windows = parseWindows(str(form, "windows"))!;
+  const dates = [...new Set(windows.map((w) => w.date))].sort();
+
   const { data: poll, error } = await supabase
     .from("polls")
     .insert({
       title: str(form, "title") || "Hangout poll",
       share_token: newShareToken(),
-      poll_start_date: str(form, "poll_start_date"),
-      poll_end_date: str(form, "poll_end_date"),
-      day_start_time: str(form, "day_start_time"),
-      day_end_time: str(form, "day_end_time"),
+      // Derived bounds for sorting only — the polled set goes in poll_windows
+      // below. See migration 013.
+      poll_start_date: dates[0],
+      poll_end_date: dates[dates.length - 1],
       slot_minutes: Number(str(form, "slot_minutes") || 60),
-      granularity: str(form, "granularity") === "date" ? "date" : "time",
+      granularity: byDate ? "date" : "time",
       group_id: groupId,
       closes_at: optInstant(form, "closes_at"),
       notes: optStr(form, "notes"),
@@ -247,6 +249,31 @@ export async function createPoll(form: FormData) {
   if (error || !poll) {
     const message = error?.message ?? "Could not create the poll.";
     redirect(`/polls/new?error=${encodeURIComponent(message)}`);
+  }
+
+  // A date poll asks about whole days, so it stores one window per date with
+  // no times at all rather than a 00:00-00:00 stand-in that every reader would
+  // then have to know to ignore.
+  const windowRows = byDate
+    ? dates.map((day_date) => ({
+        poll_id: poll.id,
+        day_date,
+        start_time: null,
+        end_time: null,
+      }))
+    : windows.map((w) => ({
+        poll_id: poll.id,
+        day_date: w.date,
+        start_time: w.start,
+        end_time: w.end,
+      }));
+
+  const { error: windowError } = await supabase.from("poll_windows").insert(windowRows);
+  if (windowError) {
+    // The poll exists but asks about nothing, which renders as a share link
+    // with an empty grid. Take it back out rather than leave that lying around.
+    await supabase.from("polls").delete().eq("id", poll.id);
+    redirect(`/polls/new?error=${encodeURIComponent(windowError.message)}`);
   }
 
   await supabase
@@ -355,8 +382,6 @@ export async function duplicatePoll(form: FormData) {
       share_token: newShareToken(),
       poll_start_date: shiftDate(original.poll_start_date, shiftDays),
       poll_end_date: shiftDate(original.poll_end_date, shiftDays),
-      day_start_time: original.day_start_time,
-      day_end_time: original.day_end_time,
       slot_minutes: original.slot_minutes,
       granularity: original.granularity,
       group_id: original.group_id,
@@ -376,11 +401,31 @@ export async function duplicatePoll(form: FormData) {
     redirect(`/polls/${sourceId}?error=${encodeURIComponent(message)}`);
   }
 
-  // Carry the invitee list and the activities across; availability starts empty.
-  const [{ data: invitees }, { data: sessions }] = await Promise.all([
+  // Carry the invitee list, the windows and the activities across; availability
+  // starts empty.
+  const [{ data: invitees }, { data: sessions }, { data: windows }] = await Promise.all([
     supabase.from("poll_invitees").select("person_id").eq("poll_id", sourceId),
     supabase.from("sessions").select("*").eq("poll_id", sourceId),
+    supabase
+      .from("poll_windows")
+      .select("day_date, start_time, end_time")
+      .eq("poll_id", sourceId),
   ]);
+
+  // Every window moves by the same number of days, so "same times next week"
+  // keeps its shape — the Saturday morning stays a Saturday morning. Times are
+  // untouched: shifting whole days cannot move a wall clock, and Malaysia has
+  // no DST to make that untrue.
+  if (windows?.length) {
+    await supabase.from("poll_windows").insert(
+      windows.map((w) => ({
+        poll_id: poll.id,
+        day_date: shiftDate(w.day_date as string, shiftDays),
+        start_time: w.start_time,
+        end_time: w.end_time,
+      })),
+    );
+  }
 
   if (invitees?.length) {
     await supabase
