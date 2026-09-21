@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef } from "react";
 import { buildSlotGrid, formatDayHeader } from "@/lib/slots";
+import type { SlotGridSpec } from "@/lib/slots";
 
 /**
  * Friend-facing date picker for a date-only poll ("which days suit the trip?").
@@ -15,27 +16,24 @@ function DateGridImpl({
   selected,
   onChange,
 }: {
-  spec: {
-    pollStartDate: string;
-    pollEndDate: string;
-    granularity?: "time" | "date";
-    dayStartTime: string;
-    dayEndTime: string;
-    slotMinutes: number;
-  };
+  spec: SlotGridSpec;
   selected: Set<number>;
   onChange: (next: Set<number>) => void;
 }) {
-  // Depends only on the polled range, so it survives the parent re-rendering
-  // for unrelated reasons (the comment field, the activity tick boxes).
+  // Depends only on which dates were picked, so it survives the parent
+  // re-rendering for unrelated reasons (the comment field, the activity tick
+  // boxes). Keyed on the windows' CONTENT: the server component builds a fresh
+  // array on every render, so its identity changes even when nothing did.
+  const windowKey = JSON.stringify(spec.windows);
   const rows = useMemo(() => {
-    const { days, grid } = buildSlotGrid({ ...spec, granularity: "date" });
-    return days.map((day, i) => ({
-      day,
-      key: grid[0][i].getTime(),
-      ...formatDayHeader(day),
+    const { columns } = buildSlotGrid({ ...spec, granularity: "date" });
+    return columns.map((column) => ({
+      day: column.date,
+      key: (column.cells[0] as { start: Date }).start.getTime(),
+      ...formatDayHeader(column.date),
     }));
-  }, [spec.pollStartDate, spec.pollEndDate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowKey]);
 
   const selectedRef = useRef(selected);
   selectedRef.current = selected;

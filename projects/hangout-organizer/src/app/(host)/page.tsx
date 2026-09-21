@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, Card, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { PushToggle } from "@/components/PushToggle";
-import { formatDuration, formatSpan } from "@/lib/slots";
+import { formatDateList, formatDuration, formatSpan } from "@/lib/slots";
 import type { EventTask, GameSession, HangoutEvent, Poll, Sport } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -10,8 +10,14 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   const supabase = await createClient();
 
-  const [{ data: pollData }, { data: sessions }, { data: sports }, { data: events }, { data: tasks }] =
-    await Promise.all([
+  const [
+    { data: pollData },
+    { data: sessions },
+    { data: sports },
+    { data: events },
+    { data: tasks },
+    { data: windowData },
+  ] = await Promise.all([
       supabase
         .from("polls")
         .select("*")
@@ -21,7 +27,11 @@ export default async function Dashboard() {
       supabase.from("sports").select("*"),
       supabase.from("events").select("*").order("event_date", { ascending: true }).limit(20),
       supabase.from("event_tasks").select("*").eq("is_done", false),
-    ]);
+      // Every poll's dates in one read. A card cannot say when a poll is from
+      // poll_start_date/poll_end_date any more — those are outer bounds, and a
+      // poll over three scattered Tuesdays would advertise a fortnight.
+      supabase.from("poll_windows").select("poll_id, day_date, start_time, end_time"),
+  ]);
 
   const sportName = new Map((sports ?? []).map((s: Sport) => [s.id, s.name]));
   const polls = (pollData ?? []) as Poll[];
@@ -29,6 +39,11 @@ export default async function Dashboard() {
   for (const session of (sessions ?? []) as GameSession[]) {
     sessionsByPoll.set(session.poll_id, [...(sessionsByPoll.get(session.poll_id) ?? []), session]);
   }
+  const datesByPoll = new Map<string, string[]>();
+  for (const row of (windowData ?? []) as { poll_id: string; day_date: string }[]) {
+    datesByPoll.set(row.poll_id, [...(datesByPoll.get(row.poll_id) ?? []), row.day_date]);
+  }
+
   const openTasks = new Map<string, number>();
   for (const task of (tasks ?? []) as EventTask[]) {
     openTasks.set(task.event_id, (openTasks.get(task.event_id) ?? 0) + 1);
@@ -78,8 +93,7 @@ export default async function Dashboard() {
                       <Badge tone="amber">polling</Badge>
                     </div>
                     <p className="mt-1 text-sm text-ink-muted">
-                      {poll.poll_start_date} to {poll.poll_end_date} ·{" "}
-                      {poll.day_start_time.slice(0, 5)}–{poll.day_end_time.slice(0, 5)}
+                      {formatDateList(datesByPoll.get(poll.id) ?? [])}
                     </p>
                     <p className="mt-1 text-xs text-ink-soft">
                       {activities.length === 0

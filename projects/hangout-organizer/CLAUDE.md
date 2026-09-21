@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Organising tool for a friend group. Two jobs:
 
-1. **Weekly badminton / pickleball sessions.** Host opens a poll over a date + time window,
-   friends drag the slots they are free on a public link, and the app surfaces the windows where
+1. **Weekly badminton / pickleball sessions.** Host picks the dates and the hours on each of
+   them, friends drag the slots they are free on a public link, and the app surfaces the windows where
    enough of the *same* people are free to actually book a court. Venues (platform, price, how far
    ahead booking opens) live in a directory so that knowledge stops living in the host's head.
 2. **One-off events** — party, Airbnb trip, karaoke — with checklists generated from reusable
@@ -53,8 +53,9 @@ npm test                           # vitest — quorum + slot maths
 
 ### The data model, and why
 
-A **poll** owns a window of time and the share token. **Sessions** hang off it as the things you
-are trying to book, each carrying its own quorum rule. Availability belongs to the *poll*.
+A **poll** owns the dates being asked about and the share token. **Sessions** hang off it as the
+things you are trying to book, each carrying its own quorum rule. Availability belongs to the
+*poll*.
 
 That split is the central decision. Whether someone is free on Tuesday has nothing to do with
 which sport is being planned, so storing availability per session meant asking the same question
@@ -64,8 +65,10 @@ many sessions: friends answer once, every session is scored against those answer
 `overlappingPeople()` can answer the clash question because both sessions share a poll.
 
 ```
-polls                 window + share_token + status + closes_at; the thing
-                      friends answer
+polls                 share_token + status + closes_at + granularity +
+                      slot_minutes; the thing friends answer
+  poll_windows        THE POLLED SET: one row per (date, start, end). Both
+                      times null = a whole date. Many rows may share a date.
   poll_invitees       who was asked, FROZEN at creation
   availability        poll_id + person_id + slot_start
   poll_responses      who submitted, when, any comment, `declined`, and
@@ -92,6 +95,7 @@ src/
   components/
     AvailabilityGrid.tsx     Friend-facing drag grid. Touch is the primary target.
     HeatmapGrid.tsx          Host-facing per-slot density.
+    HeatmapPanel.tsx         Wraps it with an Everyone / per-activity switch.
     ResponseSummary.tsx      Voted / can't make it / not answered, side by side.
     BookableBlocks.tsx       Grouped windows as a per-day timeline + confirm form.
     AudiencePicker.tsx       Everyone / a group / hand-picked, with a live preview.
@@ -99,6 +103,7 @@ src/
     GroupEditor.tsx          Create and edit roster groups.
     ShareMessage.tsx         Editable WhatsApp message preview + copy.
     MonthCalendar.tsx        Month grid; dots + an agenda list below `sm`.
+    PollDatePicker.tsx       Host-side: pick dates on a calendar, give each its windows.
     HostNav.tsx              The five host destinations: inline bar, or bottom tabs on a phone.
     ThemeToggle.tsx          Light / match device / dark. Writes the preference only.
   app/
@@ -171,9 +176,50 @@ src/
 - **Times are `timestamptz` UTC in the DB, rendered in Asia/Kuala_Lumpur at the edges.**
   `slots.ts` uses fixed +8 arithmetic because Malaysia has no DST — do not copy that to a timezone
   that does.
-- **A `day_end_time` at or before `day_start_time` means the NEXT day.** 22:00–00:00 is an ordinary
+- **A poll is a LIST OF DATED WINDOWS, not a rectangle** (migration 013). It used to carry one
+  `day_start_time`–`day_end_time` pair applied to every day in a contiguous range, which could ask
+  exactly one question: everyone free at the same hours, every day. A group that plays Tuesday
+  evenings and Saturday mornings had to poll 09:00–22:00 on both and let the grid ask thirteen
+  questions to get at four. Now the host picks dates individually and each date owns its own
+  windows, and may carry several — Saturday morning and Saturday evening are two different offers,
+  and one merged window would invent an afternoon nobody proposed.
+- **An `end_time` at or before `start_time` means the NEXT day.** 22:00–00:00 is an ordinary
   evening session and must work; 21:00–01:00 rolls the post-midnight slots onto the following
-  date. Only equality is rejected, since that would mean 24 hours.
+  date — but they stay in the STARTING date's column, because 00:30 under "Mon 22" is the small
+  hours of Tuesday reached by staying out late on Monday. Only equality is rejected, since that
+  would mean 24 hours.
+- **`poll_start_date` / `poll_end_date` are DERIVED BOUNDS, not the polled set.** They survive
+  only because `polls_status_idx` and the dashboard's ordering are built on them and a join per
+  list render would be a Tokyo round trip for a sort key. A poll over three scattered Tuesdays has
+  bounds two weeks apart and asks about three days, so anything rendering "when is this poll?"
+  reads `poll_windows` and goes through `formatDateList()` — which prints a contiguous run as a
+  range and scattered dates as a list, precisely so a share link never claims days it never asked
+  about. They cannot drift: a poll's dates are fixed at creation and nothing edits them.
+- **Overlapping windows on one date are MERGED, touching ones included.** `mergeWindows()` in
+  `slots.ts` does it, and the rows stay as the host typed them — only the derived grid is
+  normalised. Merging is not cosmetic: the same instant emitted twice would be inserted twice into
+  `availability` and counted twice by the heatmap. Touching windows merge too, or the grid would
+  draw a break in the evening that does not exist.
+- **A slot cell shows its whole RANGE, not a bare start.** Once the shared time axis went, the
+  start time alone could not say what a cell covers: whether "18:00" is an hour or a half depends
+  on a slot size stated nowhere on the friend page, and that is the thing the person tapping it is
+  committing to. The end is rendered faded rather than omitted — at full weight every cell repeats
+  eleven digits and the column stops being scannable. `GridCell` carries `time` and `endTime`
+  separately so the two halves can be styled apart without splitting `label` back up.
+- **The heatmap is scoped to an activity, not just to everyone** (`HeatmapPanel`). Someone free on
+  Tuesday is not thereby a badminton player. The bookable blocks below have always scored each
+  activity on its opted-in subset while the density grid counted everybody — and the whole-group
+  number is the more optimistic of the two, which is the wrong way round on a screen a court gets
+  booked from: a dark cell could sit directly above "no window yet" for that activity with nothing
+  explaining the gap. Counts are computed per view ON THE SERVER; shipping every availability row
+  and opt-out to the browser to intersect there would put the poll's raw answers in the page
+  source for no gain.
+- **The grid has NO SHARED TIME AXIS.** Row 3 of Monday and row 3 of Saturday are different hours,
+  so the time lives inside every cell rather than in a header column down the left — a header
+  would be one label claiming to describe cells that no longer agree with it. Columns are padded
+  to a common height so the table stays rectangular though its contents are not, and a real break
+  between two windows on one date is DRAWN (a dashed spacer), because a blank cell is
+  indistinguishable from the padding under a short column.
 - **Colour is only ever named semantically, never as a palette step.** `tailwind.config.ts` maps
   tokens — `surface`, `ink`, `line`, `accent`, `ok`/`warn`/`bad`/`info`, `slot`, `heat` — onto CSS
   variables, and `globals.css` defines those variables twice: once on `:root` and once under
@@ -274,7 +320,10 @@ sign in because nobody exists, and nobody can be created.
 Create a **new** Supabase project. Before running `migrations/001_initial_schema.sql`, replace the
 `you@example.com` placeholder near the bottom with the host address — it must match `HOST_EMAIL`.
 The migration creates the tables, enables RLS, and seeds the two sports plus three built-in
-checklist templates.
+checklist templates. Then run the rest in order — **`013_per_date_windows.sql` truncates the poll
+data** (polls, invitees, availability, responses, sessions, opt-outs, attendees) and leaves the
+roster, venues, sports, templates and push subscriptions alone. `scripts/export-poll-data.mjs`
+dumps all of it to a gitignored `backups/` file first; run that before 013, not after.
 
 **RLS is scoped to the host by email, not to `authenticated`.** The anon key and project URL both
 ship to the browser, so anyone can drive Supabase's auth endpoints directly and obtain a valid

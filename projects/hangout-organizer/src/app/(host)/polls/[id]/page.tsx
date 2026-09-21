@@ -13,7 +13,7 @@ import {
 } from "@/lib/actions";
 import { Badge, Button, Card, Empty, ErrorBanner, Input, PageHeader, Select } from "@/components/ui";
 import { ShareMessage } from "@/components/ShareMessage";
-import { HeatmapGrid } from "@/components/HeatmapGrid";
+import { HeatmapPanel } from "@/components/HeatmapPanel";
 import { ResponseSummary } from "@/components/ResponseSummary";
 import { BookableBlocks } from "@/components/BookableBlocks";
 import { VenueBooking } from "@/components/VenueBooking";
@@ -24,13 +24,15 @@ import {
   overlappingPeople,
 } from "@/lib/quorum";
 import {
-  formatDateRange,
+  formatDateList,
   formatDateSpan,
   formatDays,
   formatDuration,
   formatKl,
   formatSpan,
   instantToKl,
+  pollDates,
+  windowsFromRows,
 } from "@/lib/slots";
 import { formatTimeLeft, pollClosedReason } from "@/lib/poll-state";
 import { SITE_URL } from "@/lib/env";
@@ -72,6 +74,7 @@ export default async function PollPage({
     { data: responseData },
     { data: sportData },
     { data: venueData },
+    { data: windowData },
   ] = await Promise.all([
     supabase.from("polls").select("*").eq("id", id).maybeSingle<Poll>(),
     supabase.from("sessions").select("*").eq("poll_id", id).order("created_at"),
@@ -80,6 +83,15 @@ export default async function PollPage({
     supabase.from("poll_responses").select("*").eq("poll_id", id),
     supabase.from("sports").select("*").order("name"),
     supabase.from("venues").select("*").eq("is_active", true).order("name"),
+    // The polled set. Rides in this wave rather than a follow-up: the page
+    // cannot render a grid without it, and the wave is already the widest
+    // thing this route does.
+    supabase
+      .from("poll_windows")
+      .select("day_date, start_time, end_time")
+      .eq("poll_id", id)
+      .order("day_date")
+      .order("start_time"),
   ]);
 
   if (!pollData) notFound();
@@ -141,6 +153,38 @@ export default async function PollPage({
   }
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
 
+  /*
+   * The heatmap, once for everyone and once per activity.
+   *
+   * Someone free on Tuesday is not thereby a badminton player — the bookable
+   * blocks below have always scored each activity on its opted-in subset, but
+   * the density grid above them counted everybody. That mismatch is at its
+   * worst exactly when it matters: a dark cell sitting above "no window yet"
+   * for that activity, with nothing on screen explaining the gap.
+   *
+   * Computed here rather than in the browser so the poll's raw answers stay on
+   * the server; the client only ever receives per-slot counts.
+   */
+  const heatmapViews = [
+    {
+      id: "all",
+      label: "Everyone",
+      counts: [...slotCounts] as [number, string[]][],
+      excluded: [] as string[],
+    },
+    ...sessions.map((session) => {
+      const optedOut = optOutsBySession.get(session.id) ?? new Set<string>();
+      return {
+        id: session.id,
+        label: session.title,
+        counts: [
+          ...computeSlotCounts(entries.filter((e) => !optedOut.has(e.personId))),
+        ] as [number, string[]][],
+        excluded: [...optedOut].map((pid) => names.get(pid) ?? pid).sort(),
+      };
+    }),
+  ];
+
   // A decline is an answer, so these people are not in `pending` — the host has
   // heard from them and should not chase them. But they contribute no
   // availability, so without naming them here the host sees "6 of 8 answered"
@@ -174,22 +218,24 @@ export default async function PollPage({
 
   const byDate = poll.granularity === "date";
 
+  const windows = windowsFromRows(
+    (windowData ?? []) as { day_date: string; start_time: string | null; end_time: string | null }[],
+  );
+  // What the poll ASKS ABOUT — not poll_start_date..poll_end_date, which are
+  // only derived bounds for sorting. See migration 013.
+  const when = formatDateList(pollDates(windows));
+
   const spec = {
-    pollStartDate: poll.poll_start_date,
-    pollEndDate: poll.poll_end_date,
     granularity: poll.granularity,
-    dayStartTime: poll.day_start_time,
-    dayEndTime: poll.day_end_time,
     slotMinutes: poll.slot_minutes,
+    windows,
   };
 
   const shareUrl = `${SITE_URL()}/s/${poll.share_token}`;
   const activityNames = sessions.map((s) => s.title).join(" and ");
   const defaultMessage = [
     `${poll.title} — when are you free?`,
-    byDate
-      ? formatDateRange(poll.poll_start_date, poll.poll_end_date)
-      : `${formatDateRange(poll.poll_start_date, poll.poll_end_date)}, ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`,
+    when,
     activityNames ? `Planning: ${activityNames}` : "",
     poll.notes ?? "",
     "",
@@ -233,9 +279,9 @@ export default async function PollPage({
     <>
       <PageHeader
         title={poll.title}
-        subtitle={`${formatDateRange(poll.poll_start_date, poll.poll_end_date)}${
-          byDate ? " · whole dates" : ` · ${poll.day_start_time.slice(0, 5)}–${poll.day_end_time.slice(0, 5)}`
-        } · ${roster.length} asked${group ? ` (${group.name})` : ""}`}
+        subtitle={`${when}${byDate ? " · whole dates" : ""} · ${roster.length} asked${
+          group ? ` (${group.name})` : ""
+        }`}
         action={<Badge tone={poll.status === "polling" ? "amber" : "slate"}>{poll.status}</Badge>}
       />
 
@@ -315,7 +361,7 @@ export default async function PollPage({
               : "Everyone who has answered said they cannot make this window. Widen the dates or the hours."}
           </Empty>
         ) : (
-          <HeatmapGrid spec={spec} slotCounts={slotCounts} roster={roster} />
+          <HeatmapPanel spec={spec} views={heatmapViews} roster={roster} />
         )}
       </Card>
 

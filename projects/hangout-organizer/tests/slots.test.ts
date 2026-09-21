@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   bookingWindow,
   buildSlotGrid,
+  datesAreContiguous,
+  formatDateList,
   formatDateRange,
   DAY_MINUTES,
   formatDateSpan,
@@ -9,6 +11,8 @@ import {
   formatDayHeader,
   formatSlotRange,
   formatSpan,
+  mergeWindows,
+  pollDates,
   spansMonths,
   defaultPollRange,
   formatDuration,
@@ -19,6 +23,7 @@ import {
   klToInstant,
   shiftDate,
 } from "@/lib/slots";
+import type { GridCell } from "@/lib/slots";
 
 describe("Kuala Lumpur time conversion", () => {
   it("treats wall-clock input as UTC+8", () => {
@@ -56,45 +61,213 @@ describe("formatDuration", () => {
   });
 });
 
+/** The slot times of one column, in order. Gaps and padding are ignored. */
+function slotTimes(column: { cells: GridCell[] }): string[] {
+  return column.cells.flatMap((c) => (c.kind === "slot" ? [c.time] : []));
+}
+
+/** The cell kinds of one column, so a gap's POSITION can be asserted. */
+function kinds(column: { cells: GridCell[] }): string[] {
+  return column.cells.map((c) => c.kind);
+}
+
+const evening = (date: string) => ({ date, startTime: "19:00", endTime: "21:00" });
+
 describe("buildSlotGrid", () => {
-  it("builds a times x days grid over the polled window", () => {
+  it("builds one column per picked date", () => {
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-09",
-      pollEndDate: "2026-09-11",
-      dayStartTime: "19:00",
-      dayEndTime: "21:00",
       slotMinutes: 30,
+      windows: ["2026-09-09", "2026-09-10", "2026-09-11"].map(evening),
     });
 
-    expect(grid.days).toEqual(["2026-09-09", "2026-09-10", "2026-09-11"]);
-    expect(grid.times).toEqual(["19:00", "19:30", "20:00", "20:30"]);
-    expect(grid.grid).toHaveLength(4);
-    expect(grid.grid[0]).toHaveLength(3);
-    expect(grid.grid[0][0]).toEqual(klToInstant("2026-09-09", "19:00"));
+    expect(grid.columns.map((c) => c.date)).toEqual([
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+    ]);
+    expect(slotTimes(grid.columns[0])).toEqual(["19:00", "19:30", "20:00", "20:30"]);
+    expect(grid.rows).toBe(4);
+    expect(grid.columns[0].cells[0]).toMatchObject({
+      kind: "slot",
+      start: klToInstant("2026-09-09", "19:00"),
+    });
+  });
+
+  it("gives each date its own window rather than one shared axis", () => {
+    // The whole point of the change: Saturday is a morning, Tuesday an evening.
+    const grid = buildSlotGrid({
+      slotMinutes: 60,
+      windows: [
+        { date: "2026-09-22", startTime: "18:00", endTime: "22:00" },
+        { date: "2026-09-26", startTime: "09:00", endTime: "12:00" },
+      ],
+    });
+
+    expect(slotTimes(grid.columns[0])).toEqual(["18:00", "19:00", "20:00", "21:00"]);
+    expect(slotTimes(grid.columns[1])).toEqual(["09:00", "10:00", "11:00"]);
+  });
+
+  it("pads the short column so every column renders the same height", () => {
+    const grid = buildSlotGrid({
+      slotMinutes: 60,
+      windows: [
+        { date: "2026-09-22", startTime: "18:00", endTime: "22:00" },
+        { date: "2026-09-26", startTime: "09:00", endTime: "11:00" },
+      ],
+    });
+
+    expect(grid.rows).toBe(4);
+    expect(grid.columns.every((c) => c.cells.length === 4)).toBe(true);
+    expect(kinds(grid.columns[1])).toEqual(["slot", "slot", "pad", "pad"]);
+  });
+
+  it("draws a gap between two separate windows on the same date", () => {
+    const grid = buildSlotGrid({
+      slotMinutes: 60,
+      windows: [
+        { date: "2026-09-26", startTime: "09:00", endTime: "12:00" },
+        { date: "2026-09-26", startTime: "20:00", endTime: "22:00" },
+      ],
+    });
+
+    expect(grid.columns).toHaveLength(1);
+    expect(kinds(grid.columns[0])).toEqual([
+      "slot", "slot", "slot", "gap", "slot", "slot",
+    ]);
+    expect(slotTimes(grid.columns[0])).toEqual([
+      "09:00", "10:00", "11:00", "20:00", "21:00",
+    ]);
+  });
+
+  it("carries each slot's end time, so a cell can show its whole range", () => {
+    // A bare start cannot say what a cell covers: whether "18:00" is an hour
+    // or a half depends on a slot size stated nowhere on the friend page.
+    const hourly = buildSlotGrid({
+      slotMinutes: 60,
+      windows: [{ date: "2026-09-22", startTime: "18:00", endTime: "20:00" }],
+    });
+    expect(hourly.columns[0].cells).toMatchObject([
+      { kind: "slot", time: "18:00", endTime: "19:00", label: "18:00–19:00" },
+      { kind: "slot", time: "19:00", endTime: "20:00", label: "19:00–20:00" },
+    ]);
+
+    const half = buildSlotGrid({
+      slotMinutes: 30,
+      windows: [{ date: "2026-09-22", startTime: "18:00", endTime: "19:00" }],
+    });
+    expect(half.columns[0].cells).toMatchObject([
+      { kind: "slot", time: "18:00", endTime: "18:30" },
+      { kind: "slot", time: "18:30", endTime: "19:00" },
+    ]);
+  });
+
+  it("wraps a slot's end time across midnight rather than printing 24:00", () => {
+    const grid = buildSlotGrid({
+      slotMinutes: 60,
+      windows: [{ date: "2026-09-22", startTime: "23:00", endTime: "01:00" }],
+    });
+    expect(grid.columns[0].cells).toMatchObject([
+      { kind: "slot", time: "23:00", endTime: "00:00" },
+      { kind: "slot", time: "00:00", endTime: "01:00" },
+    ]);
   });
 
   it("excludes a trailing slot that would run past the end time", () => {
     // 19:00-20:00 at 30min gives 19:00 and 19:30 — not 20:00, which would end at 20:30.
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-09",
-      pollEndDate: "2026-09-09",
-      dayStartTime: "19:00",
-      dayEndTime: "20:00",
       slotMinutes: 30,
+      windows: [{ date: "2026-09-09", startTime: "19:00", endTime: "20:00" }],
     });
-    expect(grid.times).toEqual(["19:00", "19:30"]);
+    expect(slotTimes(grid.columns[0])).toEqual(["19:00", "19:30"]);
   });
 
-  it("handles a single-day poll", () => {
+  it("reports every polled instant once, ascending, for validation", () => {
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-09",
-      pollEndDate: "2026-09-09",
-      dayStartTime: "18:00",
-      dayEndTime: "22:00",
       slotMinutes: 60,
+      windows: [
+        { date: "2026-09-26", startTime: "20:00", endTime: "22:00" },
+        { date: "2026-09-22", startTime: "18:00", endTime: "20:00" },
+      ],
     });
-    expect(grid.days).toEqual(["2026-09-09"]);
-    expect(grid.times).toEqual(["18:00", "19:00", "20:00", "21:00"]);
+
+    expect(grid.slots.map((d) => d.getTime())).toEqual([
+      klToInstant("2026-09-22", "18:00").getTime(),
+      klToInstant("2026-09-22", "19:00").getTime(),
+      klToInstant("2026-09-26", "20:00").getTime(),
+      klToInstant("2026-09-26", "21:00").getTime(),
+    ]);
+  });
+
+  it("has nothing to show for a poll with no dates yet", () => {
+    const grid = buildSlotGrid({ slotMinutes: 60, windows: [] });
+    expect(grid.columns).toEqual([]);
+    expect(grid.slots).toEqual([]);
+    expect(grid.rows).toBe(0);
+  });
+});
+
+describe("mergeWindows", () => {
+  it("merges two overlapping windows on the same date", () => {
+    // The host added an evening window without noticing the first one.
+    expect(
+      mergeWindows([
+        { date: "2026-09-26", startTime: "18:00", endTime: "22:00" },
+        { date: "2026-09-26", startTime: "20:00", endTime: "23:00" },
+      ]),
+    ).toEqual([{ date: "2026-09-26", startMinutes: 18 * 60, endMinutes: 23 * 60 }]);
+  });
+
+  it("merges windows that merely touch, so no false gap is drawn", () => {
+    expect(
+      mergeWindows([
+        { date: "2026-09-26", startTime: "18:00", endTime: "20:00" },
+        { date: "2026-09-26", startTime: "20:00", endTime: "22:00" },
+      ]),
+    ).toEqual([{ date: "2026-09-26", startMinutes: 18 * 60, endMinutes: 22 * 60 }]);
+  });
+
+  it("leaves a genuine break in the day as two windows", () => {
+    expect(
+      mergeWindows([
+        { date: "2026-09-26", startTime: "20:00", endTime: "22:00" },
+        { date: "2026-09-26", startTime: "09:00", endTime: "12:00" },
+      ]),
+    ).toEqual([
+      { date: "2026-09-26", startMinutes: 9 * 60, endMinutes: 12 * 60 },
+      { date: "2026-09-26", startMinutes: 20 * 60, endMinutes: 22 * 60 },
+    ]);
+  });
+
+  it("never merges across dates", () => {
+    const merged = mergeWindows([
+      { date: "2026-09-26", startTime: "18:00", endTime: "22:00" },
+      { date: "2026-09-27", startTime: "18:00", endTime: "22:00" },
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((w) => w.date)).toEqual(["2026-09-26", "2026-09-27"]);
+  });
+
+  it("dedupes an exact duplicate rather than emitting the slot twice", () => {
+    // A duplicated instant would be inserted twice into `availability` and
+    // counted twice by the heatmap.
+    expect(
+      mergeWindows([
+        { date: "2026-09-26", startTime: "18:00", endTime: "22:00" },
+        { date: "2026-09-26", startTime: "18:00", endTime: "22:00" },
+      ]),
+    ).toHaveLength(1);
+  });
+
+  it("reads an end at or before the start as the next day", () => {
+    expect(
+      mergeWindows([{ date: "2026-09-26", startTime: "22:00", endTime: "02:00" }]),
+    ).toEqual([{ date: "2026-09-26", startMinutes: 22 * 60, endMinutes: 26 * 60 }]);
+  });
+
+  it("ignores whole-date windows, which carry no times to merge", () => {
+    expect(
+      mergeWindows([{ date: "2026-09-26", startTime: null, endTime: null }]),
+    ).toEqual([]);
   });
 });
 
@@ -127,55 +300,47 @@ describe("buildSlotGrid across midnight", () => {
     // The case that motivated this: a 10pm-12am session. Nothing rolls over —
     // the last slot that fits starts at 23:30.
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-14",
-      pollEndDate: "2026-09-14",
-      dayStartTime: "22:00",
-      dayEndTime: "00:00",
       slotMinutes: 30,
+      windows: [{ date: "2026-09-14", startTime: "22:00", endTime: "00:00" }],
     });
-    expect(grid.times).toEqual(["22:00", "22:30", "23:00", "23:30"]);
-    expect(grid.grid[0][0].toISOString()).toBe("2026-09-14T14:00:00.000Z"); // 22:00 KL
-    expect(grid.grid[3][0].toISOString()).toBe("2026-09-14T15:30:00.000Z"); // 23:30 KL
+    expect(slotTimes(grid.columns[0])).toEqual(["22:00", "22:30", "23:00", "23:30"]);
+    const cells = grid.columns[0].cells;
+    expect((cells[0] as { start: Date }).start.toISOString()).toBe("2026-09-14T14:00:00.000Z");
+    expect((cells[3] as { start: Date }).start.toISOString()).toBe("2026-09-14T15:30:00.000Z");
   });
 
-  it("rolls slots past midnight onto the next calendar day", () => {
+  it("rolls slots past midnight onto the next calendar day, in the SAME column", () => {
+    // 00:30 under "Mon 14" is the small hours of Tuesday, reached by staying
+    // out late on Monday — so it belongs to Monday's column, not Tuesday's.
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-14",
-      pollEndDate: "2026-09-14",
-      dayStartTime: "23:00",
-      dayEndTime: "01:00",
       slotMinutes: 30,
+      windows: [{ date: "2026-09-14", startTime: "23:00", endTime: "01:00" }],
     });
-    expect(grid.times).toEqual(["23:00", "23:30", "00:00", "00:30"]);
-    // 00:00 KL on the 15th is 16:00 UTC on the 14th.
-    expect(instantToKl(grid.grid[2][0]).date).toBe("2026-09-15");
-    expect(instantToKl(grid.grid[2][0]).time).toBe("00:00");
+    expect(grid.columns).toHaveLength(1);
+    expect(slotTimes(grid.columns[0])).toEqual(["23:00", "23:30", "00:00", "00:30"]);
+    const third = (grid.columns[0].cells[2] as { start: Date }).start;
+    expect(instantToKl(third).date).toBe("2026-09-15");
+    expect(instantToKl(third).time).toBe("00:00");
   });
 
   it("keeps overnight slots contiguous so a window can span midnight", () => {
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-14",
-      pollEndDate: "2026-09-14",
-      dayStartTime: "23:00",
-      dayEndTime: "01:00",
       slotMinutes: 30,
+      windows: [{ date: "2026-09-14", startTime: "23:00", endTime: "01:00" }],
     });
-    const starts = grid.grid.map((row) => row[0].getTime());
+    const starts = grid.slots.map((d) => d.getTime());
     for (let i = 1; i < starts.length; i++) {
       expect(starts[i] - starts[i - 1]).toBe(30 * 60_000);
     }
   });
 
-  it("still produces a plain same-day grid when the end is after the start", () => {
+  it("still produces a plain same-day column when the end is after the start", () => {
     const grid = buildSlotGrid({
-      pollStartDate: "2026-09-14",
-      pollEndDate: "2026-09-14",
-      dayStartTime: "18:00",
-      dayEndTime: "20:00",
       slotMinutes: 60,
+      windows: [{ date: "2026-09-14", startTime: "18:00", endTime: "20:00" }],
     });
-    expect(grid.times).toEqual(["18:00", "19:00"]);
-    expect(instantToKl(grid.grid[1][0]).date).toBe("2026-09-14");
+    expect(slotTimes(grid.columns[0])).toEqual(["18:00", "19:00"]);
+    expect(instantToKl(grid.slots[1]).date).toBe("2026-09-14");
   });
 });
 
@@ -211,42 +376,60 @@ describe("grid display helpers", () => {
 });
 
 describe("date-only polls", () => {
+  const wholeDates = (dates: string[]) =>
+    dates.map((date) => ({ date, startTime: null, endTime: null }));
+
   const spec = {
-    pollStartDate: "2026-09-11",
-    pollEndDate: "2026-09-15",
     granularity: "date" as const,
-    dayStartTime: "00:00",
-    dayEndTime: "00:00",
     slotMinutes: DAY_MINUTES,
+    windows: wholeDates([
+      "2026-09-11",
+      "2026-09-12",
+      "2026-09-13",
+      "2026-09-14",
+      "2026-09-15",
+    ]),
   };
 
-  it("produces exactly one slot per day", () => {
+  it("produces exactly one slot per picked date", () => {
     const grid = buildSlotGrid(spec);
-    expect(grid.days).toEqual([
+    expect(grid.columns.map((c) => c.date)).toEqual([
       "2026-09-11",
       "2026-09-12",
       "2026-09-13",
       "2026-09-14",
       "2026-09-15",
     ]);
-    expect(grid.times).toEqual(["00:00"]);
-    expect(grid.grid).toHaveLength(1);
-    expect(grid.grid[0]).toHaveLength(5);
+    expect(grid.rows).toBe(1);
+    expect(grid.columns.every((c) => c.cells.length === 1)).toBe(true);
+    expect(grid.slots).toHaveLength(5);
   });
 
   it("anchors each slot at midnight Kuala Lumpur", () => {
     const grid = buildSlotGrid(spec);
-    expect(grid.grid[0][0]).toEqual(klToInstant("2026-09-11", "00:00"));
-    expect(instantToKl(grid.grid[0][2]).time).toBe("00:00");
+    expect(grid.slots[0]).toEqual(klToInstant("2026-09-11", "00:00"));
+    expect(instantToKl(grid.slots[2]).time).toBe("00:00");
   });
 
   it("keeps consecutive days exactly one slot-step apart", () => {
     // This is what lets the quorum engine find a run of days with no changes:
     // its contiguity check is slotKeys[i+k] === start + k * step.
-    const row = buildSlotGrid(spec).grid[0].map((d) => d.getTime());
+    const row = buildSlotGrid(spec).slots.map((d) => d.getTime());
     for (let i = 1; i < row.length; i++) {
       expect(row[i] - row[i - 1]).toBe(DAY_MINUTES * 60_000);
     }
+  });
+
+  it("leaves a skipped date as a real break in the run", () => {
+    // Picking Fri and Sun but not Sat must NOT read as a 3-day trip. The
+    // engine's contiguity test is what enforces that, and it can only do so
+    // because the missing day produces no slot at all.
+    const row = buildSlotGrid({
+      granularity: "date",
+      slotMinutes: DAY_MINUTES,
+      windows: wholeDates(["2026-09-11", "2026-09-13"]),
+    }).slots.map((d) => d.getTime());
+    expect(row[1] - row[0]).toBe(2 * DAY_MINUTES * 60_000);
   });
 
   it("reads durations in days", () => {
@@ -349,5 +532,59 @@ describe("poll date range", () => {
 
   it("names both months when the window straddles one", () => {
     expect(formatDateRange("2026-09-28", "2026-10-02")).toBe("Mon 28 Sep – Fri 2 Oct");
+  });
+});
+
+describe("picked dates as a sentence", () => {
+  it("collects the distinct dates a set of windows asks about", () => {
+    expect(
+      pollDates([
+        { date: "2026-09-26", startTime: "20:00", endTime: "22:00" },
+        { date: "2026-09-22", startTime: "18:00", endTime: "22:00" },
+        { date: "2026-09-26", startTime: "09:00", endTime: "12:00" },
+      ]),
+    ).toEqual(["2026-09-22", "2026-09-26"]);
+  });
+
+  it("recognises a run with no gaps", () => {
+    expect(datesAreContiguous(["2026-09-22", "2026-09-23", "2026-09-24"])).toBe(true);
+    expect(datesAreContiguous(["2026-09-22", "2026-09-24"])).toBe(false);
+  });
+
+  it("still prints a contiguous run as a range, because that is how people say it", () => {
+    expect(formatDateList(["2026-09-22", "2026-09-23", "2026-09-24"])).toBe(
+      "Tue 22 – Thu 24 Sep",
+    );
+    expect(formatDateList(["2026-09-13"])).toBe("Sun 13 Sep");
+  });
+
+  it("lists scattered dates rather than claiming the days between them", () => {
+    // The bug this exists to prevent: three picked Tuesdays printing as
+    // "Tue 22 Sep – Tue 6 Oct" on the link friends actually read.
+    expect(formatDateList(["2026-09-22", "2026-09-24", "2026-09-26"])).toBe(
+      "Tue 22, Thu 24 & Sat 26 Sep",
+    );
+  });
+
+  it("names a month exactly where it changes", () => {
+    expect(formatDateList(["2026-09-28", "2026-10-01", "2026-10-03"])).toBe(
+      "Mon 28 Sep, Thu 1 & Sat 3 Oct",
+    );
+  });
+
+  it("summarises once a list stops being readable", () => {
+    expect(
+      formatDateList([
+        "2026-09-22",
+        "2026-09-24",
+        "2026-09-26",
+        "2026-09-29",
+        "2026-10-01",
+      ]),
+    ).toBe("5 dates between Tue 22 Sep and Thu 1 Oct");
+  });
+
+  it("says so when nothing is picked yet", () => {
+    expect(formatDateList([])).toBe("No dates");
   });
 });

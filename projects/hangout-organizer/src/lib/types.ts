@@ -49,7 +49,7 @@ export type PollStatus = "polling" | "closed";
 export type PollGranularity = "time" | "date";
 
 /**
- * A poll owns the window being asked about and the share link.
+ * A poll owns the dates being asked about and the share link.
  *
  * Availability hangs off this, not off a session, because whether someone is
  * free on Tuesday has nothing to do with which sport is being planned. One
@@ -62,10 +62,18 @@ export interface Poll {
   share_token: string;
   status: PollStatus;
   granularity: PollGranularity;
+  /**
+   * Earliest and latest picked date — DERIVED BOUNDS, not the polled set.
+   *
+   * They exist because `polls_status_idx` and the dashboard's ordering are
+   * built on them, and a join per list render to recompute a sort key would be
+   * a Tokyo round trip for nothing. A poll over three scattered Tuesdays has
+   * bounds two weeks apart and asks about three days, so anything rendering
+   * "when is this poll?" must read `poll_windows` and go through
+   * `formatDateList()`. See migration 013.
+   */
   poll_start_date: string;
   poll_end_date: string;
-  day_start_time: string;
-  day_end_time: string;
   slot_minutes: number;
   group_id: string | null;
   /**
@@ -78,6 +86,25 @@ export interface Poll {
   closes_at: string | null;
   notes: string | null;
   created_at: string;
+}
+
+/**
+ * One dated window a poll asks about — the actual polled set.
+ *
+ * Both times null means a whole-date window (the trip case). An `end_time` at
+ * or before `start_time` means the next day, exactly as the old poll-level
+ * `day_end_time` did. Several rows may share a `day_date`: Saturday can be a
+ * morning and an evening with a real gap between them.
+ *
+ * Rows are kept as the host typed them; `mergeWindows()` in `lib/slots.ts`
+ * folds any overlap when the grid is derived.
+ */
+export interface PollWindowRow {
+  id: string;
+  poll_id: string;
+  day_date: string;
+  start_time: string | null;
+  end_time: string | null;
 }
 
 export type SessionStatus = "planning" | "confirmed" | "cancelled" | "completed";

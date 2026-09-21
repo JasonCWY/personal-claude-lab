@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AvailabilityGrid } from "@/components/AvailabilityGrid";
 import { DateGrid } from "@/components/DateGrid";
+import type { SlotGridSpec } from "@/lib/slots";
 import type { GameSession, Person } from "@/lib/types";
 
 /** Which person this device answered as last time, across every poll. */
@@ -10,14 +11,7 @@ const PERSON_KEY = "hangout-organizer:person-id";
 
 interface Props {
   token: string;
-  spec: {
-    pollStartDate: string;
-    pollEndDate: string;
-    granularity?: "time" | "date";
-    dayStartTime: string;
-    dayEndTime: string;
-    slotMinutes: number;
-  };
+  spec: SlotGridSpec;
   roster: Person[];
   /** person_id -> slot timestamps they already submitted, so answers are editable. */
   existing: Record<string, number[]>;

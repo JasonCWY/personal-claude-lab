@@ -135,92 +135,319 @@ export type Granularity = "time" | "date";
 
 export const DAY_MINUTES = 24 * 60;
 
-export interface SlotGridSpec {
-  pollStartDate: string; // YYYY-MM-DD
-  pollEndDate: string; // YYYY-MM-DD
-  /**
-   * "time" polls a grid of times within each day. "date" asks only which whole
-   * days suit — the trip case — and produces one slot per day, at midnight KL.
-   * The quorum engine is unchanged either way: a run of consecutive day-slots
-   * is the same question as a run of consecutive half-hours.
-   */
-  granularity?: Granularity;
-  dayStartTime: string; // HH:MM
-  /**
-   * HH:MM. If this is at or before dayStartTime it means the NEXT day, so a
-   * 22:00-02:00 session is four hours, not a negative one. "22:00-00:00" is the
-   * common case and needs no day rollover at all: the last slot that fits
-   * starts at 23:30.
-   */
-  dayEndTime: string; // HH:MM
-  slotMinutes: number;
+/**
+ * One window of time on one KL date.
+ *
+ * This replaced a single day_start_time/day_end_time pair on the poll itself.
+ * A poll is no longer a rectangle of dates x times: the host picks the dates
+ * individually and gives each one its own windows, so Saturday can be a
+ * morning and Tuesday an evening, and a date can carry more than one window.
+ *
+ * `startTime` and `endTime` are both null on a whole-date window — the trip
+ * case, where the question is which DAYS suit and the time of day is not being
+ * asked at all.
+ */
+export interface PollWindow {
+  /** KL date this window belongs to, YYYY-MM-DD. */
+  date: string;
+  /** HH:MM, or null for a whole-date window. */
+  startTime: string | null;
+  /** HH:MM, or null. At or before startTime means the NEXT day. */
+  endTime: string | null;
 }
 
-export interface SlotGrid {
-  /** Column headers — one per polled day. */
-  days: string[];
-  /** Row headers — one per time-of-day slot. */
-  times: string[];
-  /** grid[timeIndex][dayIndex] = the instant that slot starts. */
-  grid: Date[][];
+export interface SlotGridSpec {
+  /**
+   * "time" polls windows of times on each picked date. "date" asks only which
+   * whole days suit — the trip case — and produces one slot per date, at
+   * midnight KL. The quorum engine is unchanged either way: a run of
+   * consecutive day-slots is the same question as a run of consecutive hours.
+   */
+  granularity?: Granularity;
+  /** One size for the whole poll. The engine's contiguity test assumes it. */
+  slotMinutes: number;
+  windows: PollWindow[];
 }
 
 /**
- * Every slot being polled, as a times x days grid.
+ * A window normalised to minutes from midnight KL of its own date.
  *
- * Note the row/column order: the UI renders times down the left and days across
- * the top, so indexing is [time][day].
+ * `endMinutes` may exceed 1440: a 22:00-02:00 window is 1320 -> 1560, which is
+ * what keeps an overnight session a four-hour stretch rather than a negative
+ * one. Only equality is meaningless, and the form rejects it.
  */
-export function buildSlotGrid(spec: SlotGridSpec): SlotGrid {
-  const days: string[] = [];
-  const start = klToInstant(spec.pollStartDate, "00:00");
-  const end = klToInstant(spec.pollEndDate, "00:00");
-  for (let t = start.getTime(); t <= end.getTime(); t += DAY_MS) {
-    days.push(instantToKl(new Date(t)).date);
+export interface NormalisedWindow {
+  date: string;
+  startMinutes: number;
+  endMinutes: number;
+}
+
+function toMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function minutesToTime(mins: number): string {
+  const wrapped = ((mins % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(wrapped / 60))}:${pad(wrapped % 60)}`;
+}
+
+/**
+ * Fold a date's windows into the smallest set that covers the same time.
+ *
+ * Overlapping windows on one date — 18:00-22:00 alongside 20:00-23:00 — are
+ * what a host produces when they add a second window without checking the
+ * first. Merging says what they meant (18:00-23:00) and, more importantly,
+ * keeps the slot set free of duplicates: the same instant emitted twice would
+ * be inserted twice into `availability` and counted twice by the heatmap.
+ *
+ * Touching windows merge too. 18:00-20:00 followed by 20:00-22:00 is one
+ * continuous stretch, and drawing a gap between them would tell a friend there
+ * is a break in the evening that does not exist.
+ *
+ * Done here rather than in the database so the host's list survives as they
+ * typed it — the rows stay, only the derived grid is normalised.
+ */
+export function mergeWindows(windows: PollWindow[]): NormalisedWindow[] {
+  const byDate = new Map<string, NormalisedWindow[]>();
+
+  for (const w of windows) {
+    // A whole-date window has no times to merge; it is handled by the date
+    // branch of buildSlotGrid and would normalise to a zero-length range here.
+    if (w.startTime == null || w.endTime == null) continue;
+    const startMinutes = toMinutes(w.startTime);
+    let endMinutes = toMinutes(w.endTime);
+    // An end at or before the start means the window runs into the next day.
+    if (endMinutes <= startMinutes) endMinutes += MINUTES_PER_DAY;
+    const list = byDate.get(w.date) ?? [];
+    list.push({ date: w.date, startMinutes, endMinutes });
+    byDate.set(w.date, list);
   }
 
-  // A date poll has exactly one slot per day, anchored at midnight KL. Days are
-  // a fixed 24h apart here (Malaysia has no DST), so consecutive days are
-  // contiguous by the same arithmetic the engine already uses for half-hours.
+  const out: NormalisedWindow[] = [];
+  for (const date of [...byDate.keys()].sort()) {
+    const sorted = byDate.get(date)!.sort((a, b) => a.startMinutes - b.startMinutes);
+    let current: NormalisedWindow | null = null;
+    for (const w of sorted) {
+      if (current && w.startMinutes <= current.endMinutes) {
+        current.endMinutes = Math.max(current.endMinutes, w.endMinutes);
+        continue;
+      }
+      current = { ...w };
+      out.push(current);
+    }
+  }
+  return out;
+}
+
+/** Every date the poll asks about, ascending and deduped. */
+export function pollDates(windows: PollWindow[]): string[] {
+  return [...new Set(windows.map((w) => w.date))].sort();
+}
+
+/**
+ * `poll_windows` rows -> grid windows.
+ *
+ * Structurally typed rather than importing the row type, so this module stays
+ * pure. Postgres hands back a `time` as "18:00:00" and every comparison and
+ * label here is written against "18:00", so the seconds are trimmed once, at
+ * the boundary, instead of at each of the half-dozen places that would
+ * otherwise have to remember to.
+ */
+export function windowsFromRows(
+  rows: { day_date: string; start_time: string | null; end_time: string | null }[],
+): PollWindow[] {
+  return rows.map((row) => ({
+    date: row.day_date,
+    startTime: row.start_time ? row.start_time.slice(0, 5) : null,
+    endTime: row.end_time ? row.end_time.slice(0, 5) : null,
+  }));
+}
+
+/**
+ * One cell of a date's column.
+ *
+ * "gap" is a spacer drawn between two windows on the same date, so a friend
+ * can see that Saturday morning and Saturday evening are separate stretches
+ * rather than one continuous run of hours. "pad" fills the bottom of a column
+ * shorter than the tallest one — columns no longer share a time axis, so they
+ * no longer share a height either.
+ */
+export type GridCell =
+  | {
+      kind: "slot";
+      /** Start, HH:MM. The prominent half of the cell's label. */
+      time: string;
+      /**
+       * End, HH:MM. Carried separately rather than split back out of `label`
+       * so the two halves can be styled differently: the grid sets the start
+       * at full strength and the end faded, which keeps a column scannable by
+       * start time while still saying what each block actually covers.
+       */
+      endTime: string;
+      /** "18:00–19:00" — the whole range, for aria-labels and titles. */
+      label: string;
+      start: Date;
+    }
+  | { kind: "gap" }
+  | { kind: "pad" };
+
+export interface DayColumn {
+  /** KL date, YYYY-MM-DD. */
+  date: string;
+  /** Padded to SlotGrid.rows, so every column renders the same table height. */
+  cells: GridCell[];
+}
+
+export interface SlotGrid {
+  /** One per polled date, ascending. */
+  columns: DayColumn[];
+  /** Every polled instant, deduped and ascending. Validation reads this. */
+  slots: Date[];
+  /** Height every column is padded to. */
+  rows: number;
+}
+
+/**
+ * Every slot being polled, as one column per picked date.
+ *
+ * This used to return a rectangular times x days matrix, because every day was
+ * polled over the same window. Dates now carry their own windows, so the
+ * columns are ragged and there is no shared time axis: row 3 of Monday and row
+ * 3 of Saturday are different hours, which is why each slot cell carries its
+ * own label rather than reading one from a row header.
+ */
+export function buildSlotGrid(spec: SlotGridSpec): SlotGrid {
+  const dates = pollDates(spec.windows);
+
+  // A date poll has exactly one slot per date, anchored at midnight KL. Dates
+  // are a fixed 24h apart (Malaysia has no DST), so consecutive dates are
+  // contiguous by the same arithmetic the engine already uses for half-hours —
+  // and two dates the host did NOT pick consecutively are correctly not.
   if (spec.granularity === "date") {
+    const columns = dates.map((date) => ({
+      date,
+      cells: [
+        {
+          kind: "slot" as const,
+          time: "00:00",
+          endTime: "00:00",
+          label: "",
+          start: klToInstant(date, "00:00"),
+        },
+      ],
+    }));
     return {
-      days,
-      times: ["00:00"],
-      grid: [days.map((day) => klToInstant(day, "00:00"))],
+      columns,
+      slots: dates.map((date) => klToInstant(date, "00:00")),
+      rows: columns.length ? 1 : 0,
     };
   }
 
-  const [sh, sm] = spec.dayStartTime.split(":").map(Number);
-  const [eh, em] = spec.dayEndTime.split(":").map(Number);
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const merged = mergeWindows(spec.windows);
+  const byDate = new Map<string, NormalisedWindow[]>();
+  for (const w of merged) byDate.set(w.date, [...(byDate.get(w.date) ?? []), w]);
 
-  const startMins = sh * 60 + sm;
-  let endMins = eh * 60 + em;
-  // An end at or before the start means the session runs into the next day.
-  if (endMins <= startMins) endMins += MINUTES_PER_DAY;
+  const columns: DayColumn[] = dates.map((date) => {
+    const cells: GridCell[] = [];
+    const windows = byDate.get(date) ?? [];
 
-  // Minutes from midnight of the polled day, so a value past 1440 is tomorrow.
-  const offsets: number[] = [];
-  for (let mins = startMins; mins + spec.slotMinutes <= endMins; mins += spec.slotMinutes) {
-    offsets.push(mins);
-  }
+    windows.forEach((window, i) => {
+      // Windows arrive sorted and already merged, so anything still separate is
+      // a genuine break in the day and gets a visible spacer.
+      if (i > 0) cells.push({ kind: "gap" });
 
-  const times = offsets.map((mins) => {
-    const wrapped = mins % MINUTES_PER_DAY;
-    return `${pad(Math.floor(wrapped / 60))}:${pad(wrapped % 60)}`;
+      for (
+        let mins = window.startMinutes;
+        mins + spec.slotMinutes <= window.endMinutes;
+        mins += spec.slotMinutes
+      ) {
+        const time = minutesToTime(mins);
+        cells.push({
+          kind: "slot",
+          time,
+          endTime: minutesToTime(mins + spec.slotMinutes),
+          label: formatSlotRange(time, spec.slotMinutes),
+          // Minutes past 1440 belong to the following calendar day, but stay
+          // in THIS date's column: 00:30 under "Mon 22" is the small hours of
+          // Tuesday, reached by staying out late on Monday.
+          start: new Date(
+            klToInstant(date, time).getTime() +
+              Math.floor(mins / MINUTES_PER_DAY) * DAY_MS,
+          ),
+        });
+      }
+    });
+
+    return { date, cells };
   });
 
-  // Slots that spilled past midnight belong to the following calendar day.
-  const grid = offsets.map((mins, i) =>
-    days.map(
-      (day) =>
-        new Date(
-          klToInstant(day, times[i]).getTime() +
-            Math.floor(mins / MINUTES_PER_DAY) * DAY_MS,
-        ),
+  const rows = Math.max(0, ...columns.map((c) => c.cells.length));
+  for (const column of columns) {
+    while (column.cells.length < rows) column.cells.push({ kind: "pad" });
+  }
+
+  const slots = [
+    ...new Set(
+      columns.flatMap((c) =>
+        c.cells.flatMap((cell) => (cell.kind === "slot" ? [cell.start.getTime()] : [])),
+      ),
     ),
-  );
-  return { days, times, grid };
+  ]
+    .sort((a, b) => a - b)
+    .map((ms) => new Date(ms));
+
+  return { columns, slots, rows };
+}
+
+/** Whether a list of ascending dates has no gaps in it. */
+export function datesAreContiguous(dates: string[]): boolean {
+  for (let i = 1; i < dates.length; i++) {
+    if (shiftDate(dates[i - 1], 1) !== dates[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * The polled dates as a person would say them.
+ *
+ * `formatDateRange` was enough while a poll was a contiguous window, but the
+ * host now picks dates individually: printing "Mon 22 Sep – Fri 3 Oct" for
+ * three picked Tuesdays would claim twelve days the poll never asked about,
+ * on the share link and in the WhatsApp message friends actually read.
+ *
+ * A contiguous run still prints as a range, because that is how people say it.
+ * A handful of scattered dates are listed outright. Past four, a list stops
+ * being readable — especially inside a link preview — so it becomes a count
+ * with its outer bounds, which is honest about being a summary.
+ */
+export function formatDateList(dates: string[]): string {
+  const sorted = [...new Set(dates)].sort();
+  if (sorted.length === 0) return "No dates";
+  if (sorted.length === 1 || datesAreContiguous(sorted)) {
+    return formatDateRange(sorted[0], sorted[sorted.length - 1]);
+  }
+  if (sorted.length > 4) {
+    return `${sorted.length} dates between ${formatDateRange(
+      sorted[0],
+      sorted[0],
+    )} and ${formatDateRange(sorted[sorted.length - 1], sorted[sorted.length - 1])}`;
+  }
+
+  const parts = sorted.map((d) => formatDayHeader(d));
+  return parts
+    .map((p, i) => {
+      // The month rides on the last date, and on any date whose month differs
+      // from the one after it — so "Mon 28 Sep, Thu 1 & Sat 3 Oct" names each
+      // month exactly where it changes rather than on every entry.
+      const last = i === parts.length - 1;
+      const showMonth = last || p.month !== parts[i + 1].month;
+      const text = `${p.weekday} ${p.dayOfMonth}${showMonth ? ` ${p.month}` : ""}`;
+      if (i === 0) return text;
+      return `${last ? " & " : ", "}${text}`;
+    })
+    .join("");
 }
 
 /** Default poll window: the coming week, starting tomorrow. */

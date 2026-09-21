@@ -124,3 +124,88 @@ FUTURE ENHANCEMENTS (captured 2026-09-09, not started)
        already show a count, the people rows do not show membership)
    All of this is available from roster_group_members, which /people already
    loads - it is presentation, not new queries.
+
+================================================================================
+2026-09-21 — POLLS BECAME PER-DATE WINDOWS (migration 013)
+================================================================================
+
+WHAT CHANGED
+  A poll used to be a rectangle: poll_start_date..poll_end_date crossed with ONE
+  day_start_time..day_end_time. Now the host picks dates individually on a
+  calendar and gives each date its own windows, and a date can carry several.
+
+  New table poll_windows(poll_id, day_date, start_time, end_time). Both times
+  NULL = a whole date (trip polls). polls.day_start_time/day_end_time dropped.
+
+  poll_start_date/poll_end_date SURVIVE but only as derived sort bounds —
+  polls_status_idx and the dashboard ordering are built on them. The polled set
+  is poll_windows. Never render "when is this poll" from the bounds.
+
+NEW / CHANGED FILES
+  migrations/013_per_date_windows.sql   truncates poll data, creates poll_windows
+  src/lib/poll-windows.ts   NEW, pure: parseWindows / longestRun / validateWindows
+  src/lib/slots.ts          buildSlotGrid returns per-date columns of cells
+                            (slot | gap | pad); + mergeWindows, formatDateList,
+                            pollDates, windowsFromRows, datesAreContiguous
+  src/components/PollDatePicker.tsx   NEW: calendar + per-date window editor
+  AvailabilityGrid / HeatmapGrid      per-date columns, time inside each cell
+  scripts/export-poll-data.mjs        NEW, read-only backup before 013
+
+TESTS: 142 pass (tests/poll-windows.test.ts is new, 28 of them).
+
+VERIFIED AGAINST THE LIVE DB + DEV SERVER
+  - 013 applied by the user; wipe was narrow (roster/venues/sports/templates/
+    push_subscriptions all intact), both columns gone, every CHECK behaves.
+  - Seeded a deliberately awkward poll (non-contiguous dates, overnight window,
+    two overlapping windows on one date, two separated windows on another) and
+    probed the public submit route: 13/13 correct. It now rejects a date the
+    host never picked, a slot inside the GAP between two same-date windows, and
+    one date's hours submitted against another — all three of which the old
+    rectangle accepted.
+
+STILL UNVERIFIED — NEEDS A SIGNED-IN BROWSER
+  The HOST side has only been typechecked and built, never clicked:
+  /polls/new (PollDatePicker, apply-to-all, createPoll), the poll detail page's
+  heatmap with ragged columns, and duplicatePoll carrying windows forward
+  shifted by N days. Chrome extension was not connected this session.
+
+TEST DATA LEFT BEHIND
+  Poll "Ragged windows test" (/s/test-h10j5u59) with one seeded answer.
+  Delete it from its host page when done.
+
+DECISIONS TAKEN THIS SESSION (do not re-litigate without asking)
+  - slot size stays ONE per poll; per-date would break quorum.ts contiguity
+  - past dates rejected server-side, today allowed
+  - caps: 60 dates/poll, 6 windows/date
+  - overlapping same-date windows MERGE silently; touching ones merge too
+  - date polls use the same calendar, and a skipped date is a real break in the
+    run (a 3-day trip needs 3 consecutive picked dates)
+
+--------------------------------------------------------------------------------
+2026-09-22 — two follow-up enhancements (both verified in Chrome)
+--------------------------------------------------------------------------------
+
+1. SLOT CELLS SHOW THE FULL RANGE AGAIN
+   Losing the shared time axis meant cells showed only a start ("18:00"), which
+   cannot say what the block covers — hourly vs half-hourly is a poll setting
+   stated nowhere on the friend page. Cells now read "18:00–19:00" with the end
+   faded (opacity), so a column still scans by start time. GridCell gained an
+   `endTime` field; cell min-width 3.75rem -> 4.5rem. At a 390px phone the cells
+   measure 114px with 3 columns and the page does not overflow; more columns hit
+   the 72px floor and scroll, as before, with the existing swipe hint.
+
+2. HEATMAP CAN BE SCOPED TO ONE ACTIVITY
+   New src/components/HeatmapPanel.tsx — client component, tabs "Everyone" +
+   one per session, wrapping HeatmapGrid. Counts are precomputed PER VIEW on the
+   server in polls/[id]/page.tsx (reusing the same optOutsBySession filter the
+   bookable blocks already used) and passed as [slotMs, personIds][] so no raw
+   availability reaches the browser.
+   A session view captions who is excluded, or says it matches Everyone when
+   nobody opted out.
+
+   Verified live: Kar Mun unticked Badminton via the friend link; the Badminton
+   tab dropped their times (Thu 18-20 went 2 -> 1, Sat 10:00/11:00 went 1 -> 0)
+   while Pickleball still matched Everyone.
+
+TESTS: 144 pass (two new buildSlotGrid cases for endTime, incl. the midnight
+wrap where the end must read 00:00 and not 24:00).
