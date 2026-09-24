@@ -604,6 +604,41 @@ export async function setSessionStatus(form: FormData) {
   revalidatePath("/calendar");
 }
 
+/**
+ * "Not enough people this week" — tells friends no booking is coming for this
+ * activity, without deleting the session or its poll. Reversible via
+ * `reopenSession`, unlike every action `ConfirmSubmit` wraps.
+ */
+export async function callOffSession(form: FormData) {
+  const supabase = await createClient();
+  const id = str(form, "id");
+  await supabase
+    .from("sessions")
+    .update({
+      status: "cancelled",
+      notes: optStr(form, "reason"),
+      // Same clearing as unconfirmSession — a called-off session has no valid
+      // booking, whether it was still planning or already confirmed.
+      confirmed_start_at: null,
+      confirmed_duration_minutes: null,
+      court_number: null,
+    })
+    .eq("id", id);
+  await supabase.from("attendees").delete().eq("session_id", id);
+  revalidatePath(`/polls/${str(form, "poll_id")}`);
+  revalidatePath("/calendar");
+}
+
+export async function reopenSession(form: FormData) {
+  const supabase = await createClient();
+  await supabase
+    .from("sessions")
+    .update({ status: "planning", notes: null })
+    .eq("id", str(form, "id"));
+  revalidatePath(`/polls/${str(form, "poll_id")}`);
+  revalidatePath("/calendar");
+}
+
 export async function deleteSession(form: FormData) {
   const supabase = await createClient();
   await supabase.from("sessions").delete().eq("id", str(form, "id"));

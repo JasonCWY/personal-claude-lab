@@ -6,6 +6,7 @@ import {
   deleteTemplateItem,
 } from "@/lib/event-actions";
 import { Badge, Button, Card, Field, Input, PageHeader, Select } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import type { ChecklistTemplate, ChecklistTemplateItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -59,9 +60,7 @@ export default async function TemplatesPage() {
                 {!template.is_builtin && (
                   <form action={deleteTemplate} className="ml-auto">
                     <input type="hidden" name="id" value={template.id} />
-                    <Button type="submit" variant="danger">
-                      Delete template
-                    </Button>
+                    <ConfirmSubmit variant="danger">Delete template</ConfirmSubmit>
                   </form>
                 )}
               </div>
@@ -78,12 +77,9 @@ export default async function TemplatesPage() {
                     {item.notes && <span className="text-xs text-ink-soft">— {item.notes}</span>}
                     <form action={deleteTemplateItem} className="ml-auto">
                       <input type="hidden" name="id" value={item.id} />
-                      <button
-                        type="submit"
-                        className="rounded-lg px-2 py-1.5 text-xs text-bad-fg underline transition-colors hover:text-ink"
-                      >
+                      <ConfirmSubmit className="rounded-lg px-2 py-1.5 text-xs text-bad-fg underline transition-colors hover:text-ink">
                         remove
-                      </button>
+                      </ConfirmSubmit>
                     </form>
                   </li>
                 ))}

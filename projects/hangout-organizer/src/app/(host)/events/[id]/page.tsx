@@ -19,6 +19,7 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ShareMessage } from "@/components/ShareMessage";
 import { SITE_URL } from "@/lib/env";
 import type { EventTask, HangoutEvent, Person } from "@/lib/types";
@@ -120,9 +121,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                   <form action={deleteTask} className="shrink-0">
                     <input type="hidden" name="id" value={task.id} />
                     <input type="hidden" name="event_id" value={event.id} />
-                    <Button type="submit" variant="danger">
-                      Delete
-                    </Button>
+                    <ConfirmSubmit variant="danger">Delete</ConfirmSubmit>
                   </form>
                 </div>
 
@@ -215,9 +214,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </form>
         <form action={deleteEvent} className="mt-3">
           <input type="hidden" name="id" value={event.id} />
-          <Button type="submit" variant="danger">
-            Delete event
-          </Button>
+          <ConfirmSubmit variant="danger">Delete event</ConfirmSubmit>
         </form>
       </Card>
     </>

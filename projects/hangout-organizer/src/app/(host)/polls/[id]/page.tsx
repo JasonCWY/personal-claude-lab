@@ -3,15 +3,28 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
   addSessionToPoll,
+  callOffSession,
   deletePoll,
   duplicatePoll,
+  reopenSession,
   setPollStatus,
   setSessionVenue,
   unconfirmSession,
   updatePollDeadline,
   updateSessionCourt,
 } from "@/lib/actions";
-import { Badge, Button, Card, Empty, ErrorBanner, Input, PageHeader, Select } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Empty,
+  ErrorBanner,
+  Input,
+  PageHeader,
+  Select,
+  Textarea,
+} from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ShareMessage } from "@/components/ShareMessage";
 import { HeatmapPanel } from "@/components/HeatmapPanel";
 import { ResponseSummary } from "@/components/ResponseSummary";
@@ -510,18 +523,46 @@ export default async function PollPage({
                   </button>
                 </form>
               </div>
+            ) : session.status === "cancelled" ? (
+              <div className="rounded-xl border border-dashed border-line-strong bg-surface-2 p-4">
+                <p className="font-medium text-ink">No session this week</p>
+                {session.notes && (
+                  <p className="mt-1 text-sm text-ink-muted">{session.notes}</p>
+                )}
+                <form action={reopenSession} className="mt-3">
+                  <input type="hidden" name="id" value={session.id} />
+                  <input type="hidden" name="poll_id" value={poll.id} />
+                  <button type="submit" className="min-h-tap rounded-lg px-1 text-sm text-ink-muted underline transition-colors hover:text-ink">
+                    Reopen
+                  </button>
+                </form>
+              </div>
             ) : (
-              <BookableBlocks
-                sessionId={session.id}
-                pollId={poll.id}
-                blocks={blocks}
-                roster={roster}
-                venues={bookableVenues(venues, session.sport_id)}
-                defaultVenueId={session.venue_id}
-                minPlayersFull={session.min_players_full}
-                minPlayersShort={session.min_players_short}
-                byDate={byDate}
-              />
+              <>
+                <BookableBlocks
+                  sessionId={session.id}
+                  pollId={poll.id}
+                  blocks={blocks}
+                  roster={roster}
+                  venues={bookableVenues(venues, session.sport_id)}
+                  defaultVenueId={session.venue_id}
+                  minPlayersFull={session.min_players_full}
+                  minPlayersShort={session.min_players_short}
+                  byDate={byDate}
+                />
+                <details className="mt-3 rounded-lg border border-line bg-surface p-3">
+                  <summary className="min-h-tap cursor-pointer text-sm font-medium text-ink-muted">
+                    Not enough people this week?
+                  </summary>
+                  <form action={callOffSession} className="mt-3 space-y-2">
+                    <input type="hidden" name="id" value={session.id} />
+                    <input type="hidden" name="poll_id" value={poll.id} />
+                    <label className="mb-1 block text-xs text-ink-soft">Reason (optional)</label>
+                    <Textarea name="reason" placeholder="e.g. not enough players this week" />
+                    <ConfirmSubmit variant="danger">Call off — no session this week</ConfirmSubmit>
+                  </form>
+                </details>
+              </>
             )}
           </Card>
         );
@@ -570,9 +611,9 @@ export default async function PollPage({
         </form>
         <form action={deletePoll}>
           <input type="hidden" name="id" value={poll.id} />
-          <button type="submit" className="min-h-tap rounded-lg px-1 text-sm text-bad-fg underline transition-colors hover:brightness-110">
+          <ConfirmSubmit className="min-h-tap rounded-lg px-1 text-sm text-bad-fg underline transition-colors hover:brightness-110">
             Delete poll
-          </button>
+          </ConfirmSubmit>
         </form>
       </div>
     </>

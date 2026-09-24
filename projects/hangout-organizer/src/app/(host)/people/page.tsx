@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { addPerson, deleteGroup, deletePerson, togglePersonActive } from "@/lib/actions";
 import { Button, Card, Empty, Field, Input, PageHeader } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { GroupEditor } from "@/components/GroupEditor";
 import type { Person, RosterGroup } from "@/lib/types";
 
@@ -61,9 +62,7 @@ export default async function PeoplePage() {
                 </form>
                 <form action={deletePerson}>
                   <input type="hidden" name="id" value={person.id} />
-                  <Button type="submit" variant="danger">
-                    Delete
-                  </Button>
+                  <ConfirmSubmit variant="danger">Delete</ConfirmSubmit>
                 </form>
               </div>
             </Card>
@@ -108,9 +107,7 @@ export default async function PeoplePage() {
                     </div>
                     <form action={deleteGroup}>
                       <input type="hidden" name="id" value={group.id} />
-                      <Button type="submit" variant="danger">
-                        Delete group
-                      </Button>
+                      <ConfirmSubmit variant="danger">Delete group</ConfirmSubmit>
                     </form>
                   </div>
                   <p className="mt-1 text-sm text-ink-muted">

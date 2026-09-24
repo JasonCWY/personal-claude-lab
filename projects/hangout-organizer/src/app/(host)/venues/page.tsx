@@ -10,6 +10,7 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { CURRENCY, formatMoney } from "@/lib/slots";
 import type { Sport, Venue } from "@/lib/types";
 
@@ -127,9 +128,7 @@ export default async function VenuesPage() {
                   )}
                   <form action={deleteVenue}>
                     <input type="hidden" name="id" value={venue.id} />
-                    <Button type="submit" variant="danger">
-                      Delete
-                    </Button>
+                    <ConfirmSubmit variant="danger">Delete</ConfirmSubmit>
                   </form>
                 </div>
               </div>

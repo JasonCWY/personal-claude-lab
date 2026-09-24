@@ -141,6 +141,9 @@ export default async function PublicPollPage({
   const inviteeIds = (inviteeData ?? []).map((r) => r.person_id as string);
   const sessions = (sessionData ?? []) as GameSession[];
   const booked = sessions.filter((s) => s.status === "confirmed" && s.confirmed_start_at);
+  // Called off this week — no booking coming, so it stops demanding a
+  // headcount and stops counting toward "Ask the host for details."
+  const calledOff = sessions.filter((s) => s.status === "cancelled");
   const bookedVenueIds = [...new Set(booked.map((s) => s.venue_id).filter(Boolean))] as string[];
 
   // The roster and the opt-outs each need an ID list from the wave above, but
@@ -251,24 +254,40 @@ export default async function PublicPollPage({
         <ThemeToggle className="hidden shrink-0 sm:flex" />
       </div>
 
-      {sessions.length > 0 && (
+      {sessions.filter((s) => s.status !== "cancelled").length > 0 && (
         <ul className="mt-3 space-y-1 text-xs text-ink-soft">
-          {sessions.map((s) => (
-            <li key={s.id}>
-              <span className="font-medium text-ink-muted">{s.title}</span> — need{" "}
-              {s.min_players_full} for{" "}
-              {byDate ? formatDays(s.full_duration_minutes) : formatDuration(s.full_duration_minutes)}
-              , or {s.min_players_short} for{" "}
-              {byDate
-                ? formatDays(s.short_duration_minutes)
-                : formatDuration(s.short_duration_minutes)}
-            </li>
-          ))}
+          {sessions
+            .filter((s) => s.status !== "cancelled")
+            .map((s) => (
+              <li key={s.id}>
+                <span className="font-medium text-ink-muted">{s.title}</span> — need{" "}
+                {s.min_players_full} for{" "}
+                {byDate ? formatDays(s.full_duration_minutes) : formatDuration(s.full_duration_minutes)}
+                , or {s.min_players_short} for{" "}
+                {byDate
+                  ? formatDays(s.short_duration_minutes)
+                  : formatDuration(s.short_duration_minutes)}
+              </li>
+            ))}
         </ul>
       )}
       <p className="mt-2 text-xs text-ink-soft">
         Answer once — it counts for everything listed above. All times Malaysia time.
       </p>
+
+      {calledOff.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {calledOff.map((s) => (
+            <div
+              key={s.id}
+              className="rounded-lg border border-dashed border-line-strong bg-surface-2 p-3"
+            >
+              <p className="text-sm font-medium text-ink-muted">No {s.title} this week</p>
+              {s.notes && <p className="mt-1 text-xs text-ink-soft">{s.notes}</p>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {poll.notes && <p className="mt-3 text-sm text-ink-muted">{poll.notes}</p>}
 
@@ -365,7 +384,9 @@ export default async function PublicPollPage({
                 })}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-ink-muted">Ask the host for details.</p>
+              sessions.some((s) => s.status === "planning") && (
+                <p className="mt-2 text-sm text-ink-muted">Ask the host for details.</p>
+              )
             )}
           </div>
         ) : (
