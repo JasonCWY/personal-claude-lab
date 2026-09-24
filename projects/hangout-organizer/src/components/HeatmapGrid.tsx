@@ -1,3 +1,5 @@
+"use client";
+
 import { buildSlotGrid, formatDayHeader } from "@/lib/slots";
 import type { SlotGridSpec } from "@/lib/slots";
 import type { Person } from "@/lib/types";
@@ -14,14 +16,27 @@ import type { Person } from "@/lib/types";
  * axis any more, so each cell carries its own time and a break between two
  * windows on one date is drawn rather than implied.
  */
+export interface SelectedSlot {
+  time: number;
+  date: string;
+  /** "18:00–19:00", or "" on a date poll where a cell has no time range. */
+  label: string;
+}
+
 export function HeatmapGrid({
   spec,
   slotCounts,
   roster,
+  selected,
+  onSelectSlot,
 }: {
   spec: SlotGridSpec;
   slotCounts: Map<number, string[]>;
   roster: Person[];
+  /** The tapped slot's timestamp, so its cell can be highlighted. */
+  selected?: number | null;
+  /** Tapping a cell again clears it — the caller owns that toggle. */
+  onSelectSlot?: (cell: SelectedSlot | null) => void;
 }) {
   const { columns, rows } = buildSlotGrid(spec);
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
@@ -92,31 +107,48 @@ export function HeatmapGrid({
                   );
                 }
 
-                const people = slotCounts.get(cell.start.getTime()) ?? [];
+                const time = cell.start.getTime();
+                const people = slotCounts.get(time) ?? [];
+                const isSelected = selected === time;
                 return (
-                  <td
-                    key={column.date}
-                    title={`${byDate ? column.date : `${column.date} ${cell.label}`} — ${
-                      people.length
-                        ? people.map((id) => names.get(id) ?? id).join(", ")
-                        : "nobody free"
-                    }`}
-                    className={`h-11 min-w-[4.5rem] rounded align-middle font-medium sm:h-9 ${shade(
-                      people.length,
-                    )}`}
-                  >
-                    {/* Same range treatment as the friend grid — see there. */}
-                    <span className="block text-[0.65rem] font-normal leading-none opacity-80">
-                      {byDate ? (
-                        "free"
-                      ) : (
-                        <>
-                          {cell.time}
-                          <span className="opacity-65">–{cell.endTime}</span>
-                        </>
-                      )}
-                    </span>
-                    {people.length || ""}
+                  <td key={column.date} className="p-0">
+                    {/*
+                      A <button> so the same "who's free then" the desktop
+                      `title` tooltip has always carried is reachable by tap —
+                      a floating popover was ruled out because the grid's own
+                      `overflow-x` scroll container breaks sticky/absolute
+                      positioning on the other axis; the caller renders the
+                      answer in a panel below the table instead.
+                    */}
+                    <button
+                      type="button"
+                      title={`${byDate ? column.date : `${column.date} ${cell.label}`} — ${
+                        people.length
+                          ? people.map((id) => names.get(id) ?? id).join(", ")
+                          : "nobody free"
+                      }`}
+                      onClick={() =>
+                        onSelectSlot?.(
+                          isSelected ? null : { time, date: column.date, label: cell.label },
+                        )
+                      }
+                      className={`h-11 min-w-[4.5rem] w-full rounded align-middle font-medium sm:h-9 ${shade(
+                        people.length,
+                      )} ${isSelected ? "ring-2 ring-accent ring-offset-1 ring-offset-surface" : ""}`}
+                    >
+                      {/* Same range treatment as the friend grid — see there. */}
+                      <span className="block text-[0.65rem] font-normal leading-none opacity-80">
+                        {byDate ? (
+                          "free"
+                        ) : (
+                          <>
+                            {cell.time}
+                            <span className="opacity-65">–{cell.endTime}</span>
+                          </>
+                        )}
+                      </span>
+                      {people.length || ""}
+                    </button>
                   </td>
                 );
               })}

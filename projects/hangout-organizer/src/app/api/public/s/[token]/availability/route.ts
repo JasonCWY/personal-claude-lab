@@ -4,6 +4,7 @@ import { sendHostPush } from "@/lib/push";
 import { describeResponse } from "@/lib/push-message";
 import { pollClosedReason } from "@/lib/poll-state";
 import { buildSlotGrid, windowsFromRows } from "@/lib/slots";
+import { buildPollResultsPayload } from "@/lib/poll-results";
 import type { Poll } from "@/lib/types";
 
 const MAX_SLOTS = 2000;
@@ -281,5 +282,10 @@ export async function POST(
     }
   });
 
-  return NextResponse.json({ ok: true, saved: accepted.length });
+  // The friend's own results, returned inline so they see the heatmap and the
+  // answered/waiting split the moment Saving… resolves — no second round trip,
+  // and no reliance on the GET route firing before the page has re-rendered.
+  const results = await buildPollResultsPayload(supabase, poll.id);
+
+  return NextResponse.json({ ok: true, saved: accepted.length, ...results });
 }

@@ -199,6 +199,53 @@ export function computeCandidates(
   });
 }
 
+export interface HeatmapView {
+  id: string;
+  label: string;
+  /** slot instant (ms) -> person ids free then, already filtered for this view. */
+  counts: [number, string[]][];
+  /** Who this view leaves out, named, so a smaller grid explains itself. */
+  excluded: string[];
+}
+
+/**
+ * The heatmap, once for everyone and once per activity.
+ *
+ * Someone free on Tuesday is not thereby a badminton player — `computeCandidates`
+ * already scores each activity on its own opted-in subset, but a density grid
+ * that counted everybody would be the more optimistic of the two, and that is
+ * the wrong way round on a screen a court gets booked from. Shared by the host
+ * page and the friend-facing results route so both draw from the same tested
+ * logic instead of two copies drifting apart.
+ */
+export function buildHeatmapViews(
+  entries: AvailabilityEntry[],
+  sessions: { id: string; title: string }[],
+  optOutsBySession: Map<string, Set<string>>,
+  names: Map<string, string>,
+): HeatmapView[] {
+  const slotCounts = computeSlotCounts(entries);
+  return [
+    {
+      id: "all",
+      label: "Everyone",
+      counts: [...slotCounts] as [number, string[]][],
+      excluded: [] as string[],
+    },
+    ...sessions.map((session) => {
+      const optedOut = optOutsBySession.get(session.id) ?? new Set<string>();
+      return {
+        id: session.id,
+        label: session.title,
+        counts: [
+          ...computeSlotCounts(entries.filter((e) => !optedOut.has(e.personId))),
+        ] as [number, string[]][],
+        excluded: [...optedOut].map((pid) => names.get(pid) ?? pid).sort(),
+      };
+    }),
+  ];
+}
+
 /** Who has not answered yet, so the host knows who to chase. */
 export function pendingResponders<T extends { id: string }>(
   roster: T[],

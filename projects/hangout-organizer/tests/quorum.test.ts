@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildHeatmapViews,
   computeCandidates,
   computeSlotCounts,
   groupCandidates,
@@ -178,6 +179,35 @@ describe("computeSlotCounts", () => {
   it("de-duplicates a person submitted twice for the same slot", () => {
     const counts = computeSlotCounts([...free("19:00", ["ali"]), ...free("19:00", ["ali"])]);
     expect(counts.get(klToInstant(DAY, "19:00").getTime())).toEqual(["ali"]);
+  });
+});
+
+describe("buildHeatmapViews", () => {
+  const names = new Map([
+    ["ali", "Ali"],
+    ["ben", "Ben"],
+    ["cara", "Cara"],
+  ]);
+
+  it("builds an 'Everyone' view plus one view per session, excluding opted-out people", () => {
+    const entries = [...free("19:00", ["ali", "ben", "cara"])];
+    const sessions = [{ id: "s1", title: "Badminton" }];
+    const optOutsBySession = new Map([["s1", new Set(["cara"])]]);
+
+    const views = buildHeatmapViews(entries, sessions, optOutsBySession, names);
+
+    expect(views).toHaveLength(2);
+    expect(views[0]).toMatchObject({ id: "all", label: "Everyone", excluded: [] });
+    expect(views[0].counts).toEqual([[klToInstant(DAY, "19:00").getTime(), ["ali", "ben", "cara"]]]);
+
+    expect(views[1]).toMatchObject({ id: "s1", label: "Badminton", excluded: ["Cara"] });
+    expect(views[1].counts).toEqual([[klToInstant(DAY, "19:00").getTime(), ["ali", "ben"]]]);
+  });
+
+  it("returns just the 'Everyone' view when there are no sessions", () => {
+    const views = buildHeatmapViews(free("19:00", ["ali"]), [], new Map(), names);
+    expect(views).toHaveLength(1);
+    expect(views[0].id).toBe("all");
   });
 });
 

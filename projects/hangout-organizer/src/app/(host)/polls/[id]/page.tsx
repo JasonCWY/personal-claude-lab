@@ -18,8 +18,8 @@ import { ResponseSummary } from "@/components/ResponseSummary";
 import { BookableBlocks } from "@/components/BookableBlocks";
 import { VenueBooking } from "@/components/VenueBooking";
 import {
+  buildHeatmapViews,
   computeCandidates,
-  computeSlotCounts,
   groupCandidates,
   overlappingPeople,
 } from "@/lib/quorum";
@@ -143,7 +143,6 @@ export default async function PollPage({
     personId: row.person_id,
     slotStart: new Date(row.slot_start),
   }));
-  const slotCounts = computeSlotCounts(entries);
 
   const optOutsBySession = new Map<string, Set<string>>();
   for (const row of (optOutData ?? []) as SessionOptOut[]) {
@@ -153,37 +152,11 @@ export default async function PollPage({
   }
   const names = new Map(roster.map((p) => [p.id, p.display_name]));
 
-  /*
-   * The heatmap, once for everyone and once per activity.
-   *
-   * Someone free on Tuesday is not thereby a badminton player — the bookable
-   * blocks below have always scored each activity on its opted-in subset, but
-   * the density grid above them counted everybody. That mismatch is at its
-   * worst exactly when it matters: a dark cell sitting above "no window yet"
-   * for that activity, with nothing on screen explaining the gap.
-   *
-   * Computed here rather than in the browser so the poll's raw answers stay on
-   * the server; the client only ever receives per-slot counts.
-   */
-  const heatmapViews = [
-    {
-      id: "all",
-      label: "Everyone",
-      counts: [...slotCounts] as [number, string[]][],
-      excluded: [] as string[],
-    },
-    ...sessions.map((session) => {
-      const optedOut = optOutsBySession.get(session.id) ?? new Set<string>();
-      return {
-        id: session.id,
-        label: session.title,
-        counts: [
-          ...computeSlotCounts(entries.filter((e) => !optedOut.has(e.personId))),
-        ] as [number, string[]][],
-        excluded: [...optedOut].map((pid) => names.get(pid) ?? pid).sort(),
-      };
-    }),
-  ];
+  // Computed here rather than in the browser so the poll's raw answers stay on
+  // the server; the client only ever receives per-slot counts. See
+  // `buildHeatmapViews()` in `lib/quorum.ts` for why the heatmap is scoped per
+  // activity rather than to everyone.
+  const heatmapViews = buildHeatmapViews(entries, sessions, optOutsBySession, names);
 
   // A decline is an answer, so these people are not in `pending` — the host has
   // heard from them and should not chase them. But they contribute no

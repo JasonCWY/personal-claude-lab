@@ -254,6 +254,60 @@ function BlockRow({
 
         <Button type="submit">Confirm</Button>
       </form>
+
+      {/*
+        A second, independent form for when none of the computed candidates
+        match reality — the court is only free from 20:15, not 20:00.
+        Disambiguated server-side by which field is present
+        (confirmed_start_at_local vs confirmed_start_at), so no shared client
+        state is needed between the two forms.
+      */}
+      <details className="mt-2">
+        <summary className="cursor-pointer text-sm text-ink-soft underline">
+          Use a custom time instead
+        </summary>
+        <form action={confirmSession} className="mt-2 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="id" value={sessionId} />
+          <input type="hidden" name="poll_id" value={pollId} />
+          <input type="hidden" name="people" value={block.people.join(",")} />
+
+          <div className="min-w-[11rem]">
+            <label className="mb-1 block text-xs text-ink-soft">Start at</label>
+            <Input type="datetime-local" name="confirmed_start_at_local" required />
+          </div>
+
+          <div className="min-w-[7rem]">
+            <label className="mb-1 block text-xs text-ink-soft">Minutes</label>
+            <Input
+              type="number"
+              name="confirmed_duration_minutes"
+              min={15}
+              step={5}
+              defaultValue={block.durationMinutes}
+              required
+            />
+          </div>
+
+          <div className="min-w-[11rem]">
+            <label className="mb-1 block text-xs text-ink-soft">Venue</label>
+            <Select name="venue_id" defaultValue={defaultVenueId ?? ""}>
+              <option value="">No venue</option>
+              {venues.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="min-w-[8rem]">
+            <label className="mb-1 block text-xs text-ink-soft">Court</label>
+            <Input name="court_number" placeholder="Optional" maxLength={40} />
+          </div>
+
+          <Button type="submit">Confirm custom time</Button>
+        </form>
+      </details>
     </div>
   );
 }

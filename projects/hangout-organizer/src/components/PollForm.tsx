@@ -3,8 +3,18 @@
 import { useEffect, useState } from "react";
 import { AvailabilityGrid } from "@/components/AvailabilityGrid";
 import { DateGrid } from "@/components/DateGrid";
+import { HeatmapPanel } from "@/components/HeatmapPanel";
+import { ResponseSummary } from "@/components/ResponseSummary";
 import type { SlotGridSpec } from "@/lib/slots";
-import type { GameSession, Person } from "@/lib/types";
+import type { HeatmapView } from "@/lib/quorum";
+import type { GameSession, Person, PollResponse } from "@/lib/types";
+
+interface PollResults {
+  heatmapViews: HeatmapView[];
+  /** person_id -> how many slots they marked. Plain object: it crossed JSON. */
+  slotsByPerson: Record<string, number>;
+  responses: PollResponse[];
+}
 
 /** Which person this device answered as last time, across every poll. */
 const PERSON_KEY = "hangout-organizer:person-id";
@@ -50,6 +60,10 @@ export function PollForm({
   // Including themselves, so 1 is "just me" and is the honest default.
   const [partySize, setPartySize] = useState(1);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // Results the friend has EARNED, in the sense the whole gate exists for —
+  // either just handed back by a submit this session, or fetched below for a
+  // returning visitor who answered on a previous visit.
+  const [results, setResults] = useState<PollResults | null>(null);
   const responded = new Set(respondedIds);
   const declinedSetForInit = new Set(declinedIds);
 
@@ -101,7 +115,34 @@ export function PollForm({
     setDeclined(declinedSet.has(person.id));
     setPartySize(existingPartySizes[person.id] ?? 1);
     setStatus("idle");
+    // Belongs to whoever was just left behind — carrying it over would show one
+    // person the previous person's results for the instant before the effect
+    // below replaces it (or, if they haven't answered, forever).
+    setResults(null);
   }
+
+  /*
+   * A returning visitor who already answered on a previous visit: `results`
+   * is still null because no submit happened THIS session. Re-fetches
+   * whenever the identity changes; skipped once populated so a successful
+   * fetch does not immediately re-fetch itself.
+   */
+  useEffect(() => {
+    if (!personId || !responded.has(personId) || results) return;
+    let cancelled = false;
+    fetch(`/api/public/s/${token}/results?personId=${personId}`)
+      .then((res) => (res.ok ? (res.json() as Promise<PollResults>) : null))
+      .then((data) => {
+        if (!cancelled && data) setResults(data);
+      })
+      .catch(() => {
+        // A revisit without results is no worse than before this feature existed.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personId]);
 
   async function submit(asDecline: boolean) {
     if (!personId) return;
@@ -120,8 +161,14 @@ export function PollForm({
         }),
       });
       if (res.ok) {
+        const data = (await res.json()) as { saved: number } & PollResults;
         setDeclined(asDecline);
         if (asDecline) setSelected(new Set());
+        setResults({
+          heatmapViews: data.heatmapViews,
+          slotsByPerson: data.slotsByPerson,
+          responses: data.responses,
+        });
       }
       setStatus(res.ok ? "saved" : "error");
     } catch {
@@ -188,6 +235,7 @@ export function PollForm({
               // Nothing to undo if it was never stored.
             }
             setPersonId(null);
+            setResults(null);
           }}
           className="-mr-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft underline transition-colors hover:text-ink"
         >
@@ -449,6 +497,31 @@ export function PollForm({
           </button>
         </div>
       </div>
+
+      {/*
+        Gated on `results`, which only ever becomes non-null after a successful
+        submit or a fetch the results route itself re-checks — so this never
+        renders for someone who hasn't answered, however this component got
+        rendered. No heatmap for a decline: there is no availability of theirs
+        to show on it, though who's-answered still applies to them too.
+      */}
+      {results && (
+        <div className="mt-6 border-t border-line pt-4">
+          <h3 className="mb-3 font-medium">Latest results</h3>
+          {!declined && (
+            <div className="mb-4">
+              <HeatmapPanel spec={spec} views={results.heatmapViews} roster={roster} />
+            </div>
+          )}
+          <ResponseSummary
+            roster={roster}
+            responses={results.responses}
+            slotsByPerson={new Map(Object.entries(results.slotsByPerson))}
+            byDate={byDate}
+            showComments={false}
+          />
+        </div>
+      )}
     </div>
   );
 }

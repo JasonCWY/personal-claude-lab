@@ -22,6 +22,7 @@ export function ResponseSummary({
   responses,
   slotsByPerson,
   byDate,
+  showComments = true,
 }: {
   roster: Person[];
   responses: PollResponse[];
@@ -29,6 +30,12 @@ export function ResponseSummary({
   slotsByPerson: Map<string, number>;
   /** A date poll counts whole days, so the unit word changes. */
   byDate: boolean;
+  /**
+   * Off on the friend-facing results view: a note left for the host is not
+   * something every other invitee should be able to read. Defaults on, so
+   * the host page's existing usage is unchanged.
+   */
+  showComments?: boolean;
 }) {
   const byPerson = new Map(responses.map((r) => [r.person_id, r]));
 
@@ -47,6 +54,7 @@ export function ResponseSummary({
         count={voted.length}
         tone="ok"
         empty="Nobody yet."
+        showComments={showComments}
         people={voted.map((p) => {
           const n = slotsByPerson.get(p.id) ?? 0;
           // Guests are counted into every window this person carries, so the
@@ -71,6 +79,7 @@ export function ResponseSummary({
         count={declined.length}
         tone="neutral"
         empty="Nobody has ruled themselves out."
+        showComments={showComments}
         people={declined.map((p) => ({
           id: p.id,
           name: p.display_name,
@@ -102,6 +111,7 @@ function Column({
   tone,
   empty,
   people,
+  showComments = true,
 }: {
   title: string;
   count: number;
@@ -114,6 +124,7 @@ function Column({
     comment: string | null;
     muted: boolean;
   }[];
+  showComments?: boolean;
 }) {
   const heading = {
     ok: "text-ok-fg",
@@ -149,7 +160,7 @@ function Column({
                   </span>
                 )}
               </span>
-              {p.comment && (
+              {showComments && p.comment && (
                 <span className="mt-0.5 block text-xs italic text-ink-soft">
                   &ldquo;{p.comment}&rdquo;
                 </span>

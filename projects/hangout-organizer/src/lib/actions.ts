@@ -517,12 +517,24 @@ export async function confirmSession(form: FormData) {
   const id = str(form, "id");
   const pollId = str(form, "poll_id");
 
+  // Two ways in: a computed candidate's ready-made ISO instant (the <Select>
+  // in BookableBlocks), or a hand-typed KL wall-clock time from the "use a
+  // custom time instead" form — a host confirming a court that is only free
+  // from 20:15, not one of the times the engine happened to offer.
+  const manualLocal = optStr(form, "confirmed_start_at_local");
+  const startAt = manualLocal ? optInstant(form, "confirmed_start_at_local") : str(form, "confirmed_start_at");
+  if (!startAt) return;
+
+  // Bounded, not rejected, same as every other friend/host-facing numeric
+  // input here — a stray 0 or blank should not fail the whole confirmation.
+  const durationMinutes = Math.max(15, Number(str(form, "confirmed_duration_minutes")) || 60);
+
   await supabase
     .from("sessions")
     .update({
       status: "confirmed",
-      confirmed_start_at: str(form, "confirmed_start_at"),
-      confirmed_duration_minutes: Number(str(form, "confirmed_duration_minutes")),
+      confirmed_start_at: startAt,
+      confirmed_duration_minutes: durationMinutes,
       venue_id: optStr(form, "venue_id"),
       // Shown on the public page: the venue gets people to the building, this
       // is what stops them standing in the lobby asking which court.

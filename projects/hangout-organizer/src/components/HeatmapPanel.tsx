@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { HeatmapGrid } from "@/components/HeatmapGrid";
+import { HeatmapGrid, type SelectedSlot } from "@/components/HeatmapGrid";
+import { formatDayHeader } from "@/lib/slots";
 import type { SlotGridSpec } from "@/lib/slots";
 import type { Person } from "@/lib/types";
+import type { HeatmapView } from "@/lib/quorum";
+
+export type { HeatmapView };
 
 /**
  * The density grid, scoped to everyone or to one activity.
@@ -16,19 +20,12 @@ import type { Person } from "@/lib/types";
  * dark cell up here could sit above "no window yet" down there with nothing
  * explaining the gap. Switching the heatmap to the same subset closes it.
  *
- * Counts arrive precomputed per view. The alternative — shipping every
- * availability row and every opt-out to the browser and intersecting there —
- * would move work to the slowest machine in the chain and put the poll's raw
- * answers in the page source for no gain.
+ * Counts arrive precomputed per view, via `buildHeatmapViews()` in
+ * `lib/quorum.ts`. The alternative — shipping every availability row and every
+ * opt-out to the browser and intersecting there — would move work to the
+ * slowest machine in the chain and put the poll's raw answers in the page
+ * source for no gain.
  */
-export interface HeatmapView {
-  id: string;
-  label: string;
-  /** slot instant (ms) -> person ids free then, already filtered for this view. */
-  counts: [number, string[]][];
-  /** Who this view leaves out, named, so a smaller grid explains itself. */
-  excluded: string[];
-}
 
 export function HeatmapPanel({
   spec,
@@ -40,8 +37,15 @@ export function HeatmapPanel({
   roster: Person[];
 }) {
   const [activeId, setActiveId] = useState(views[0]?.id ?? "all");
+  const [selected, setSelected] = useState<SelectedSlot | null>(null);
   const active = views.find((v) => v.id === activeId) ?? views[0];
   if (!active) return null;
+
+  const names = new Map(roster.map((p) => [p.id, p.display_name]));
+  // Re-read from the active view on every render rather than snapshotting the
+  // people list at selection time, so switching activity tabs with a slot
+  // still selected updates who it shows without any extra wiring.
+  const selectedPeople = selected ? new Map(active.counts).get(selected.time) ?? [] : null;
 
   return (
     <div>
@@ -68,7 +72,40 @@ export function HeatmapPanel({
         </div>
       )}
 
-      <HeatmapGrid spec={spec} slotCounts={new Map(active.counts)} roster={roster} />
+      <HeatmapGrid
+        spec={spec}
+        slotCounts={new Map(active.counts)}
+        roster={roster}
+        selected={selected?.time ?? null}
+        onSelectSlot={setSelected}
+      />
+
+      {/*
+        Panel below the grid, not a popover near the tapped cell — the grid's
+        own `overflow-x` scroll container makes a floating popover's position
+        unreliable on the axis it doesn't scroll, and this reads fine on a
+        phone where the tapped cell is right above it anyway.
+      */}
+      <div className="mt-2 rounded-lg border border-line bg-surface-2 p-3 text-sm">
+        {selected ? (
+          <>
+            <p className="font-medium text-ink">
+              {(() => {
+                const { weekday, dayOfMonth, month } = formatDayHeader(selected.date);
+                return `${weekday} ${dayOfMonth} ${month}`;
+              })()}
+              {selected.label && <span className="text-ink-muted"> · {selected.label}</span>}
+            </p>
+            <p className="mt-1 text-ink-muted">
+              {selectedPeople && selectedPeople.length
+                ? selectedPeople.map((id) => names.get(id) ?? id).join(", ")
+                : "Nobody free then."}
+            </p>
+          </>
+        ) : (
+          <p className="text-ink-soft">Tap a cell to see who&apos;s free then.</p>
+        )}
+      </div>
 
       {/*
         Only said on an activity view, and only when it actually differs from
